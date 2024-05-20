@@ -457,6 +457,7 @@ class LibraryScreenModel(
             DownloadAction.NEXT_10_CHAPTERS -> downloadUnreadChapters(mangas, 10)
             DownloadAction.NEXT_25_CHAPTERS -> downloadUnreadChapters(mangas, 25)
             DownloadAction.UNREAD_CHAPTERS -> downloadUnreadChapters(mangas, null)
+            DownloadAction.ALL_CHAPTERS -> downloadChapters(mangas)
         }
         clearSelection()
     }
@@ -481,6 +482,30 @@ class LibraryScreenModel(
                             )
                     }
                     .let { if (amount != null) it.take(amount) else it }
+
+                downloadManager.downloadChapters(manga, chapters)
+            }
+        }
+    }
+
+    /**
+     * Queues the amount specified of chapters from the list of mangas given.
+     *
+     * @param mangas the list of manga.
+     */
+    private fun downloadChapters(mangas: List<Manga>) {
+        screenModelScope.launchNonCancellable {
+            mangas.forEach { manga ->
+                val chapters = getChaptersByMangaId.await(manga.id)
+                    .fastFilterNot { chapter ->
+                        downloadManager.getQueuedDownloadOrNull(chapter.id) != null ||
+                            downloadManager.isChapterDownloaded(
+                                chapter.name,
+                                chapter.scanlator,
+                                manga.title,
+                                manga.source,
+                            )
+                    }
 
                 downloadManager.downloadChapters(manga, chapters)
             }
