@@ -214,7 +214,20 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                     else -> true
                 }
             }
-            .sortedBy { it.manga.title }
+            .sortedWith(
+                compareByDescending<LibraryManga> {
+                    // Prefer manga updating today
+                    it.manga.nextUpdate <= fetchWindowUpperBound
+                }.thenByDescending {
+                    // Prefer manga the user has started
+                    it.lastRead > 0L
+                }.thenByDescending {
+                    // Prefer manga that the user has most recently read
+                    it.lastRead
+                }.thenByDescending {
+                    // Default sorting
+                    it.manga.title
+                })
 
         notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate)
 
@@ -253,6 +266,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                         semaphore.withPermit {
                             mangaInSource.forEach { libraryManga ->
                                 val manga = libraryManga.manga
+                                logcat(LogPriority.INFO, message = { "Updating ${manga.title}" })
                                 ensureActive()
 
                                 // Don't continue to update if manga is not in library
