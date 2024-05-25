@@ -166,6 +166,7 @@ dependencies {
 
     implementation(libs.bundles.sqlite)
 
+    implementation(kotlinx.stdlib)
     implementation(kotlinx.reflect)
     implementation(kotlinx.immutables)
 

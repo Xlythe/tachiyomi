@@ -33,6 +33,10 @@ class BackupDecoder(
                 source
             }.use { it.readByteArray() }
 
+            if (backupString.isEmpty()) {
+                return Backup(backupManga = emptyList())
+            }
+
             parser.decodeFromByteArray(BackupSerializer, backupString)
         }
     }
