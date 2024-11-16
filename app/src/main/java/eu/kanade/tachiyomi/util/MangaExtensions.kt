@@ -72,7 +72,10 @@ fun Manga.shouldDownloadNewChapters(dbCategories: List<Long>, preferences: Downl
     if (includedCategories.isEmpty()) return true
 
     // In included category
-    return categories.any { it in includedCategories }
+    if (categories.any { it in includedCategories }) return true
+
+    // Default
+    return true
 }
 
 suspend fun Manga.editCover(
