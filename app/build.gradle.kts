@@ -5,6 +5,7 @@ plugins {
     id("com.mikepenz.aboutlibraries.plugin")
     kotlin("android")
     kotlin("plugin.serialization")
+    alias(kotlinx.plugins.compose.compiler)
 }
 
 val SUPPORTED_ABIS = setOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
