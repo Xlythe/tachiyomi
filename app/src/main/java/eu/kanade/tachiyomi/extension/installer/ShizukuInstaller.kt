@@ -13,10 +13,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import rikka.shizuku.Shizuku
+import rikka.shizuku.ShizukuRemoteProcess
 import tachiyomi.core.util.system.logcat
 import tachiyomi.i18n.MR
 import java.io.BufferedReader
 import java.io.InputStream
+import java.lang.reflect.Method
 
 class ShizukuInstaller(private val service: Service) : Installer(service) {
 
@@ -92,14 +94,36 @@ class ShizukuInstaller(private val service: Service) : Installer(service) {
     }
 
     private fun exec(command: String, stdin: InputStream? = null): ShellResult {
-        @Suppress("DEPRECATION")
-        val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+        val process = newProcess(command)
+            ?: return ShellResult(-1, "Error: Failed to start process for command: $command")
         if (stdin != null) {
             process.outputStream.use { stdin.copyTo(it) }
         }
         val output = process.inputStream.bufferedReader().use(BufferedReader::readText)
         val resultCode = process.waitFor()
         return ShellResult(resultCode, output)
+    }
+
+    private fun newProcess(command: String): ShizukuRemoteProcess? {
+        return try {
+            // Get the private newProcess method
+            val method: Method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java, // Command array
+                Array<String>::class.java, // Env array (nullable)
+                String::class.java // Directory (nullable)
+            )
+
+            // Make the method accessible
+            method.isAccessible = true
+
+            // Call the method with appropriate arguments
+            val commandArray = arrayOf("sh", "-c", command)
+            method.invoke(null, commandArray, null, null) as? ShizukuRemoteProcess
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 
     private data class ShellResult(val resultCode: Int, val out: String)

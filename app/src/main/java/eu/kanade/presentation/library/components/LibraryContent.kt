@@ -23,6 +23,7 @@ import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.library.model.LibraryManga
 import tachiyomi.presentation.core.components.material.PullRefresh
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 @Composable
@@ -85,11 +86,15 @@ fun LibraryContent(
             refreshing = isRefreshing,
             onRefresh = {
                 val started = onRefresh(categories[currentPage()])
-                if (!started) return@PullRefresh
                 scope.launch {
-                    // Fake refresh status but hide it after a second as it's a long running task
                     isRefreshing = true
-                    delay(1.seconds)
+                    if (started) {
+                        // Fake refresh status but hide it after a second as it's a long running task
+                        delay(1.seconds)
+                    } else {
+                        // Dismissing the refresh too quickly breaks PullRefresh, so add an artificial delay
+                        delay(100.milliseconds)
+                    }
                     isRefreshing = false
                 }
             },

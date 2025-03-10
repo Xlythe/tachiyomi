@@ -93,7 +93,10 @@ fun UpdateScreen(
                     refreshing = isRefreshing,
                     onRefresh = {
                         val started = onUpdateLibrary()
-                        if (!started) return@PullRefresh
+                        if (!started) {
+                            isRefreshing = false
+                            return@PullRefresh
+                        }
                         scope.launch {
                             // Fake refresh status but hide it after a second as it's a long running task
                             isRefreshing = true
