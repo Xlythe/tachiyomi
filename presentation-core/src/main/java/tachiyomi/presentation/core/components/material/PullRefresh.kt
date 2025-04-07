@@ -1,9 +1,15 @@
 package tachiyomi.presentation.core.components.material
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.PositionalThreshold
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -26,30 +32,23 @@ fun PullRefresh(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
     indicatorPadding: PaddingValues = PaddingValues(0.dp),
+    state: PullToRefreshState = rememberPullToRefreshState(),
     content: @Composable () -> Unit,
 ) {
-    Box(modifier = modifier) {
-        val contentPadding = remember(indicatorPadding) {
-            object : PaddingValues {
-                override fun calculateLeftPadding(layoutDirection: LayoutDirection): Dp =
-                    indicatorPadding.calculateLeftPadding(layoutDirection)
-
-                override fun calculateTopPadding(): Dp = 0.dp
-
-                override fun calculateRightPadding(layoutDirection: LayoutDirection): Dp =
-                    indicatorPadding.calculateRightPadding(layoutDirection)
-
-                override fun calculateBottomPadding(): Dp =
-                    indicatorPadding.calculateBottomPadding()
-            }
-        }
-        PullToRefreshBox(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(contentPadding),
+    val indicator: @Composable BoxScope.() -> Unit = {
+        Indicator(
+            modifier = Modifier.align(Alignment.TopCenter).padding(indicatorPadding),
             isRefreshing = refreshing,
-            onRefresh = onRefresh) {
-            content()
-        }
+            state = state,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            threshold = PositionalThreshold
+        )
+    }
+    Box(modifier = modifier
+        .pullToRefresh(state = state, isRefreshing = refreshing, onRefresh = onRefresh, enabled = enabled()),
+        contentAlignment = Alignment.TopStart) {
+        content()
+        indicator()
     }
 }
