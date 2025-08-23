@@ -40,9 +40,13 @@ android {
 
 tasks {
     withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions.freeCompilerArgs += listOf(
-            "-Xexpect-actual-classes",
-            "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
-        )
+        compilerOptions {
+            freeCompilerArgs.addAll(
+                listOf(
+                    "-Xexpect-actual-classes",
+                    "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
+                )
+            )
+        }
     }
 }

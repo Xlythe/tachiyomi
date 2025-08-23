@@ -38,8 +38,12 @@ android {
 
 tasks {
     withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions.freeCompilerArgs += listOf(
-            "-Xexpect-actual-classes",
-        )
+        compilerOptions {
+            freeCompilerArgs.addAll(
+                listOf(
+                    "-Xexpect-actual-classes",
+                )
+            )
+        }
     }
 }
