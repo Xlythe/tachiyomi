@@ -181,6 +181,7 @@ dependencies {
     implementation(androidx.recyclerview)
     implementation(androidx.viewpager)
     implementation(androidx.profileinstaller)
+    implementation(androidx.localbroadcastmanager)
 
     implementation(androidx.bundles.lifecycle)
 

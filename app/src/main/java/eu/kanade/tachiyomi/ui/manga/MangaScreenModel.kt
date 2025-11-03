@@ -490,13 +490,12 @@ class MangaScreenModel(
 
     private fun updateDownloadState(download: Download) {
         updateSuccessState { successState ->
-            val modifiedIndex = successState.chapters.indexOfFirst { it.id == download.chapter.id }
-            if (modifiedIndex < 0) return@updateSuccessState successState
-
-            val newChapters = successState.chapters.toMutableList().apply {
-                val item = removeAt(modifiedIndex)
-                    .copy(downloadState = download.status, downloadProgress = download.progress)
-                add(modifiedIndex, item)
+            val newChapters = successState.chapters.map {
+                if (it.id == download.chapter.id) {
+                    it.copy(downloadState = download.status, downloadProgress = download.progress)
+                } else {
+                    it
+                }
             }
             successState.copy(chapters = newChapters)
         }
