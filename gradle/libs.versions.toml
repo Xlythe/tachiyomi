@@ -7,7 +7,7 @@ richtext = "0.20.0"
 shizuku_version = "13.1.5"
 sqldelight = "2.0.0" # Bug in 2.1.0
 sqlite = "2.6.1"
-voyager = "1.1.0-alpha01"
+voyager = "1.1.0-beta03"
 
 [libraries]
 desugar = "com.android.tools:desugar_jdk_libs:2.1.5"

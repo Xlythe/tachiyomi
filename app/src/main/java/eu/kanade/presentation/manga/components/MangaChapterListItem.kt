@@ -1,6 +1,10 @@
 package eu.kanade.presentation.manga.components
 
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -37,6 +42,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -45,6 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.kanade.tachiyomi.data.download.model.Download
+import kotlinx.coroutines.flow.collectLatest
+import me.saket.swipe.SwipeAction
 import me.saket.swipe.SwipeableActionsBox
 import me.saket.swipe.rememberSwipeableActionsState
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -57,6 +65,7 @@ import kotlin.math.absoluteValue
 
 @Composable
 fun MangaChapterListItem(
+    chapterId: Long,
     title: String,
     date: String?,
     readProgress: String?,
@@ -77,6 +86,10 @@ fun MangaChapterListItem(
 ) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val interactionSource = remember { MutableInteractionSource() }
+
+    val updatedOnLongClick by rememberUpdatedState(onLongClick)
+    val updatedOnClick by rememberUpdatedState(onClick)
 
     val textAlpha = if (read) ReadItemAlpha else 1f
     val textSubtitleAlpha = if (read) ReadItemAlpha else SecondaryItemAlpha
@@ -88,7 +101,7 @@ fun MangaChapterListItem(
             override val touchSlop: Float = configuration.touchSlop * 3f
         },
     ) {
-        val start = getSwipeAction(
+        val startAction = getSwipeAction(
             action = chapterSwipeStartAction,
             read = read,
             bookmark = bookmark,
@@ -96,7 +109,7 @@ fun MangaChapterListItem(
             background = MaterialTheme.colorScheme.primaryContainer,
             onSwipe = { onChapterSwipe(chapterSwipeStartAction) },
         )
-        val end = getSwipeAction(
+        val endAction = getSwipeAction(
             action = chapterSwipeEndAction,
             read = read,
             bookmark = bookmark,
@@ -105,29 +118,49 @@ fun MangaChapterListItem(
             onSwipe = { onChapterSwipe(chapterSwipeEndAction) },
         )
 
+        val startActions = remember(startAction) { listOfNotNull(startAction) }
+        val endActions = remember(endAction) { listOfNotNull(endAction) }
+
         val swipeableActionsState = rememberSwipeableActionsState()
         LaunchedEffect(Unit) {
             // Haptic effect when swipe over threshold
             val swipeActionThresholdPx = with(density) { swipeActionThreshold.toPx() }
             snapshotFlow { swipeableActionsState.offset.value.absoluteValue > swipeActionThresholdPx }
-                .collect { if (it) haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
+                .collectLatest { if (it) haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
         }
 
         SwipeableActionsBox(
             modifier = Modifier.clipToBounds(),
             state = swipeableActionsState,
-            startActions = listOfNotNull(start),
-            endActions = listOfNotNull(end),
+            startActions = startActions,
+            endActions = endActions,
             swipeThreshold = swipeActionThreshold,
             backgroundUntilSwipeThreshold = MaterialTheme.colorScheme.surfaceContainerLowest,
         ) {
             Row(
                 modifier = modifier
                     .selectedBackground(selected)
-                    .combinedClickable(
-                        onClick = onClick,
-                        onLongClick = onLongClick,
-                    )
+                    .pointerInput(chapterId) {
+                        detectTapGestures(
+                            onLongPress = { updatedOnLongClick() },
+                            onTap = { updatedOnClick() },
+                            onPress = {
+                                val press = PressInteraction.Press(it)
+                                interactionSource.emit(press)
+                                val released = try {
+                                    tryAwaitRelease()
+                                } catch (e: Exception) {
+                                    false
+                                }
+                                if (released) {
+                                    interactionSource.emit(PressInteraction.Release(press))
+                                } else {
+                                    interactionSource.emit(PressInteraction.Cancel(press))
+                                }
+                            },
+                        )
+                    }
+                    .indication(interactionSource, LocalIndication.current)
                     .padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 12.dp),
             ) {
                 Column(
@@ -215,6 +248,7 @@ fun MangaChapterListItem(
     }
 }
 
+@Composable
 private fun getSwipeAction(
     action: LibraryPreferences.ChapterSwipeAction,
     read: Boolean,
@@ -222,7 +256,7 @@ private fun getSwipeAction(
     downloadState: Download.State,
     background: Color,
     onSwipe: () -> Unit,
-): me.saket.swipe.SwipeAction? {
+): SwipeAction? {
     return when (action) {
         LibraryPreferences.ChapterSwipeAction.ToggleRead -> swipeAction(
             icon = if (!read) Icons.Outlined.Done else Icons.Outlined.RemoveDone,
@@ -249,25 +283,29 @@ private fun getSwipeAction(
     }
 }
 
+@Composable
 private fun swipeAction(
     onSwipe: () -> Unit,
     icon: ImageVector,
     background: Color,
     isUndo: Boolean = false,
-): me.saket.swipe.SwipeAction {
-    return me.saket.swipe.SwipeAction(
-        icon = {
-            Icon(
-                modifier = Modifier.padding(16.dp),
-                imageVector = icon,
-                tint = contentColorFor(background),
-                contentDescription = null,
-            )
-        },
-        background = background,
-        onSwipe = onSwipe,
-        isUndo = isUndo,
-    )
+): SwipeAction {
+    val onSwipeState by rememberUpdatedState(onSwipe)
+    return remember(icon, background, isUndo) {
+        SwipeAction(
+            icon = {
+                Icon(
+                    modifier = Modifier.padding(16.dp),
+                    imageVector = icon,
+                    tint = contentColorFor(background),
+                    contentDescription = null,
+                )
+            },
+            background = background,
+            onSwipe = onSwipeState,
+            isUndo = isUndo,
+        )
+    }
 }
 
 private val swipeActionThreshold = 56.dp
