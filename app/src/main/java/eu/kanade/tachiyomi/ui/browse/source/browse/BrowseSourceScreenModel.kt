@@ -77,21 +77,26 @@ class BrowseSourceScreenModel(
     var displayMode by sourcePreferences.sourceDisplayMode().asState(screenModelScope)
 
     val source = sourceManager.getOrStub(sourceId)
+    private val sourceFilterPreference = sourcePreferences.sourceFilters(sourceId)
 
     init {
         if (source is CatalogueSource) {
+            val restoredFilters = SourceFilterState.restore(
+                source.getFilterList(),
+                sourceFilterPreference.get(),
+            )
             mutableState.update {
                 var query: String? = null
                 var listing = it.listing
 
                 if (listing is Listing.Search) {
                     query = listing.query
-                    listing = Listing.Search(query, source.getFilterList())
+                    listing = Listing.Search(query, restoredFilters)
                 }
 
                 it.copy(
                     listing = listing,
-                    filters = source.getFilterList(),
+                    filters = restoredFilters,
                     toolbarQuery = query,
                 )
             }
@@ -137,6 +142,7 @@ class BrowseSourceScreenModel(
     fun resetFilters() {
         if (source !is CatalogueSource) return
 
+        sourceFilterPreference.delete()
         mutableState.update { it.copy(filters = source.getFilterList()) }
     }
 
@@ -147,6 +153,7 @@ class BrowseSourceScreenModel(
     fun setFilters(filters: FilterList) {
         if (source !is CatalogueSource) return
 
+        sourceFilterPreference.set(SourceFilterState.serialize(filters))
         mutableState.update {
             it.copy(
                 filters = filters,

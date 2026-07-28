@@ -40,6 +40,11 @@ class SourcePreferences(
 
     fun hideInLibraryItems() = preferenceStore.getBoolean("browse_hide_in_library_items", false)
 
+    fun sourceFilters(sourceId: Long) = preferenceStore.getString(
+        Preference.appStateKey("source_filters_$sourceId"),
+        "",
+    )
+
     fun extensionRepos() = preferenceStore.getStringSet("extension_repos", emptySet())
 
     fun extensionUpdatesCount() = preferenceStore.getInt("ext_updates_count", 0)
