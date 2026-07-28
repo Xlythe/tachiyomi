@@ -35,6 +35,7 @@ import eu.kanade.tachiyomi.ui.manga.track.TrackItem
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import eu.kanade.tachiyomi.util.removeCovers
+import eu.kanade.tachiyomi.util.shouldContinueDownloadingUnreadChapters
 import eu.kanade.tachiyomi.util.shouldDownloadNewChapters
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
@@ -376,6 +377,46 @@ class MangaScreenModel(
         }
     }
 
+    fun showEditMangaTitleDialog() {
+        val manga = successState?.manga ?: return
+        updateSuccessState {
+            it.copy(dialog = Dialog.EditMangaTitle(manga))
+        }
+    }
+
+    fun updateMangaCustomTitle(manga: Manga, requestedTitle: String?) {
+        val source = successState?.source ?: return
+        screenModelScope.launchIO {
+            val sourceTitle = mangaRepository.getSourceTitle(manga.id)
+            val customTitle = requestedTitle
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() && it != sourceTitle }
+            val updatedTitle = customTitle ?: sourceTitle
+            if (updatedTitle == manga.title) return@launchIO
+
+            if (!downloadManager.renameManga(source, manga.title, updatedTitle)) {
+                withUIContext {
+                    snackbarHostState.showSnackbar(
+                        message = context.stringResource(MR.strings.manga_title_update_failed),
+                    )
+                }
+                return@launchIO
+            }
+
+            if (updateManga.awaitUpdateCustomTitle(manga.id, customTitle)) {
+                val updatedManga = mangaRepository.getMangaById(manga.id)
+                updateSuccessState { it.copy(manga = updatedManga) }
+            } else {
+                downloadManager.renameManga(source, updatedTitle, manga.title)
+                withUIContext {
+                    snackbarHostState.showSnackbar(
+                        message = context.stringResource(MR.strings.unknown_error),
+                    )
+                }
+            }
+        }
+    }
+
     fun setFetchInterval(manga: Manga, interval: Int) {
         screenModelScope.launchIO {
             if (
@@ -534,6 +575,15 @@ class MangaScreenModel(
      */
     private suspend fun fetchChaptersFromSource(manualFetch: Boolean = false) {
         val state = successState ?: return
+        val downloadStatesByChapterId = state.chapters.associate { it.id to it.downloadState }
+        val continueUnreadDownloads = manualFetch &&
+            shouldContinueDownloadingUnreadChapters(state.chapters.map { it.chapter }) { chapter ->
+                downloadStatesByChapterId[chapter.id] in setOf(
+                    Download.State.QUEUE,
+                    Download.State.DOWNLOADING,
+                    Download.State.DOWNLOADED,
+                )
+            }
         try {
             withIOContext {
                 val chapters = state.source.getChapterList(state.manga.toSManga())
@@ -546,7 +596,7 @@ class MangaScreenModel(
                 )
 
                 if (manualFetch) {
-                    downloadNewChapters(newChapters)
+                    downloadNewChapters(newChapters, continueUnreadDownloads)
                 }
             }
         } catch (e: Throwable) {
@@ -779,13 +829,19 @@ class MangaScreenModel(
         }
     }
 
-    private fun downloadNewChapters(chapters: List<Chapter>) {
+    private fun downloadNewChapters(
+        chapters: List<Chapter>,
+        continueUnreadDownloads: Boolean,
+    ) {
         screenModelScope.launchNonCancellable {
             val manga = successState?.manga ?: return@launchNonCancellable
             val categories = getCategories.await(manga.id).map { it.id }
             if (
                 chapters.isEmpty() ||
-                !manga.shouldDownloadNewChapters(categories, downloadPreferences)
+                (
+                    !continueUnreadDownloads &&
+                        !manga.shouldDownloadNewChapters(categories, downloadPreferences)
+                    )
             ) {
                 return@launchNonCancellable
             }
@@ -1010,6 +1066,7 @@ class MangaScreenModel(
         ) : Dialog
         data class DeleteChapters(val chapters: List<Chapter>) : Dialog
         data class DuplicateManga(val manga: Manga, val duplicate: Manga) : Dialog
+        data class EditMangaTitle(val manga: Manga) : Dialog
         data class SetFetchInterval(val manga: Manga) : Dialog
         data object SettingsSheet : Dialog
         data object TrackSheet : Dialog

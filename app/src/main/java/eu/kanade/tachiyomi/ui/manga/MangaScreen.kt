@@ -31,6 +31,7 @@ import eu.kanade.presentation.manga.DuplicateMangaDialog
 import eu.kanade.presentation.manga.EditCoverAction
 import eu.kanade.presentation.manga.MangaScreen
 import eu.kanade.presentation.manga.components.DeleteChaptersDialog
+import eu.kanade.presentation.manga.components.EditMangaTitleDialog
 import eu.kanade.presentation.manga.components.MangaCoverDialog
 import eu.kanade.presentation.manga.components.ScanlatorFilterDialog
 import eu.kanade.presentation.manga.components.SetIntervalDialog
@@ -144,6 +145,7 @@ class MangaScreen(
             onCoverClicked = screenModel::showCoverDialog,
             onShareClicked = { shareManga(context, screenModel.manga, screenModel.source) }.takeIf { isHttpSource },
             onDownloadActionClicked = screenModel::runDownloadAction.takeIf { !successState.source.isLocalOrStub() },
+            onEditTitleClicked = screenModel::showEditMangaTitleDialog,
             onEditCategoryClicked = screenModel::showChangeCategoryDialog.takeIf { successState.manga.favorite },
             onEditFetchIntervalClicked = screenModel::showSetFetchIntervalDialog.takeIf {
                 successState.manga.favorite
@@ -190,6 +192,13 @@ class MangaScreen(
                 onConfirm = { screenModel.toggleFavorite(onRemoved = {}, checkDuplicate = false) },
                 onOpenManga = { navigator.push(MangaScreen(dialog.duplicate.id)) },
             )
+            is MangaScreenModel.Dialog.EditMangaTitle -> {
+                EditMangaTitleDialog(
+                    manga = dialog.manga,
+                    onDismissRequest = onDismissRequest,
+                    onConfirm = { screenModel.updateMangaCustomTitle(dialog.manga, it) },
+                )
+            }
             MangaScreenModel.Dialog.SettingsSheet -> ChapterSettingsDialog(
                 onDismissRequest = onDismissRequest,
                 manga = successState.manga,

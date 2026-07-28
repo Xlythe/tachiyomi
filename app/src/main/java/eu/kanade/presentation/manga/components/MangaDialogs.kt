@@ -2,16 +2,19 @@ package eu.kanade.presentation.manga.components
 
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -23,6 +26,7 @@ import eu.kanade.tachiyomi.util.system.isDevFlavor
 import eu.kanade.tachiyomi.util.system.isPreviewBuildType
 import kotlinx.collections.immutable.toImmutableList
 import tachiyomi.domain.manga.interactor.FetchInterval
+import tachiyomi.domain.manga.model.Manga
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.WheelTextPicker
 import tachiyomi.presentation.core.components.material.padding
@@ -31,6 +35,61 @@ import tachiyomi.presentation.core.i18n.stringResource
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlin.math.absoluteValue
+
+@Composable
+fun EditMangaTitleDialog(
+    manga: Manga,
+    onDismissRequest: () -> Unit,
+    onConfirm: (String?) -> Unit,
+) {
+    var title by rememberSaveable(manga.id, manga.title) {
+        mutableStateOf(manga.title)
+    }
+    val normalizedTitle = title.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text(stringResource(MR.strings.edit_manga_title)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(MR.strings.title)) },
+                    supportingText = { Text(stringResource(MR.strings.manga_title_edit_help)) },
+                    singleLine = true,
+                )
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = {
+                        onDismissRequest()
+                        onConfirm(null)
+                    },
+                ) {
+                    Text(stringResource(MR.strings.action_reset))
+                }
+                TextButton(onClick = onDismissRequest) {
+                    Text(stringResource(MR.strings.action_cancel))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = normalizedTitle.isNotEmpty() && normalizedTitle != manga.title,
+                onClick = {
+                    onDismissRequest()
+                    onConfirm(normalizedTitle)
+                },
+            ) {
+                Text(stringResource(MR.strings.action_ok))
+            }
+        },
+    )
+}
 
 @Composable
 fun DeleteChaptersDialog(

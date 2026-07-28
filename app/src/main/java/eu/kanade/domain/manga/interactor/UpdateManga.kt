@@ -38,8 +38,13 @@ class UpdateManga(
             ""
         }
 
-        // if the manga isn't a favorite, set its title from source and update in db
-        val title = if (remoteTitle.isEmpty() || localManga.favorite) null else remoteTitle
+        // Keep favorite titles stable, except when the source confirms that a stale
+        // "Official " prefix belongs to the same title.
+        val title = when {
+            remoteTitle.isEmpty() -> null
+            !localManga.favorite -> remoteTitle
+            else -> localManga.title.officialPrefixCorrectionFor(remoteTitle)
+        }
 
         val coverLastModified =
             when {
@@ -103,4 +108,42 @@ class UpdateManga(
             MangaUpdate(id = mangaId, favorite = favorite, dateAdded = dateAdded),
         )
     }
+
+    suspend fun awaitUpdateCustomTitle(mangaId: Long, customTitle: String?): Boolean {
+        return mangaRepository.updateCustomTitle(mangaId, customTitle)
+    }
+}
+
+private val OFFICIAL_TITLE_PREFIX_REGEX =
+    """^[\s\p{Z}\u200B\u2060\uFEFF]*Official[\s\p{Z}\u200B\u2060\uFEFF]+"""
+        .toRegex(RegexOption.IGNORE_CASE)
+
+private val TITLE_SUBTITLE_SEPARATOR_REGEX =
+    (
+        """(?:[\s\p{Z}\u200B\u2060\uFEFF]*[:：][\s\p{Z}\u200B\u2060\uFEFF]*|""" +
+            """[\s\p{Z}\u200B\u2060\uFEFF]+[\-‐‑‒–—―][\s\p{Z}\u200B\u2060\uFEFF]+|""" +
+            """[\s\p{Z}\u200B\u2060\uFEFF]*[(\[（［][\s\p{Z}\u200B\u2060\uFEFF]*)"""
+        ).toRegex()
+
+internal fun String.officialPrefixCorrectionFor(sourceTitle: String): String? {
+    val corrected = OFFICIAL_TITLE_PREFIX_REGEX.replaceFirst(this, "")
+    if (corrected == this) return null
+
+    val source = sourceTitle.trim()
+    val sameTitle = corrected.equals(source, ignoreCase = true)
+    val correctedHasSourceBase = corrected.hasTitleBase(source)
+    val sourceHasCorrectedBase = source.hasTitleBase(corrected)
+    val sameBaseTitle = corrected.titleBase().equals(source.titleBase(), ignoreCase = true)
+
+    return corrected.takeIf { sameTitle || correctedHasSourceBase || sourceHasCorrectedBase || sameBaseTitle }
+}
+
+private fun String.hasTitleBase(base: String): Boolean {
+    if (base.isEmpty() || length <= base.length || !startsWith(base, ignoreCase = true)) return false
+    return TITLE_SUBTITLE_SEPARATOR_REGEX.find(substring(base.length))?.range?.first == 0
+}
+
+private fun String.titleBase(): String {
+    val separatorIndex = TITLE_SUBTITLE_SEPARATOR_REGEX.find(this)?.range?.first ?: length
+    return substring(0, separatorIndex).trim()
 }

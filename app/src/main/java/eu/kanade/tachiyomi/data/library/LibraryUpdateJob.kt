@@ -24,6 +24,7 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
+import eu.kanade.tachiyomi.util.shouldContinueDownloadingUnreadChapters
 import eu.kanade.tachiyomi.util.shouldDownloadNewChapters
 import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
@@ -45,6 +46,7 @@ import tachiyomi.core.util.lang.withIOContext
 import tachiyomi.core.util.system.logcat
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.NoChaptersException
 import tachiyomi.domain.download.service.DownloadPreferences
@@ -87,6 +89,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private val updateManga: UpdateManga = Injekt.get()
     private val getCategories: GetCategories = Injekt.get()
     private val syncChaptersWithSource: SyncChaptersWithSource = Injekt.get()
+    private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get()
     private val fetchInterval: FetchInterval = Injekt.get()
 
     private val notifier = LibraryUpdateNotifier(context)
@@ -227,7 +230,8 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                 }.thenByDescending {
                     // Default sorting
                     it.manga.title
-                })
+                },
+            )
 
         notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate)
 
@@ -280,12 +284,19 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                     manga,
                                 ) {
                                     try {
+                                        val continueUnreadDownloads =
+                                            getChaptersByMangaId
+                                                .await(manga.id, applyScanlatorFilter = true)
+                                                .shouldContinueDownloadingUnreadChapters(manga, downloadManager)
                                         val newChapters = updateManga(manga, fetchWindow)
                                             .sortedByDescending { it.sourceOrder }
 
                                         if (newChapters.isNotEmpty()) {
                                             val categoryIds = getCategories.await(manga.id).map { it.id }
-                                            if (manga.shouldDownloadNewChapters(categoryIds, downloadPreferences)) {
+                                            if (
+                                                continueUnreadDownloads ||
+                                                manga.shouldDownloadNewChapters(categoryIds, downloadPreferences)
+                                            ) {
                                                 downloadChapters(manga, newChapters)
                                                 hasDownloads.set(true)
                                             }

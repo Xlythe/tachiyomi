@@ -25,6 +25,8 @@ interface MangaRepository {
 
     suspend fun getDuplicateLibraryManga(id: Long, title: String): List<Manga>
 
+    suspend fun getSourceTitle(mangaId: Long): String
+
     suspend fun resetViewerFlags(): Boolean
 
     suspend fun setMangaCategories(mangaId: Long, categoryIds: List<Long>)
@@ -34,4 +36,6 @@ interface MangaRepository {
     suspend fun update(update: MangaUpdate): Boolean
 
     suspend fun updateAll(mangaUpdates: List<MangaUpdate>): Boolean
+
+    suspend fun updateCustomTitle(mangaId: Long, customTitle: String?): Boolean
 }

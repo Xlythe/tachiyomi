@@ -65,10 +65,68 @@ class AppModule(val app: Application) : InjektModule {
                 callback = object : AndroidSqliteDriver.Callback(Database.Schema) {
                     override fun onOpen(db: SupportSQLiteDatabase) {
                         super.onOpen(db)
+                        repairInterimCustomTitleMigration(db)
                         setPragma(db, "foreign_keys = ON")
                         setPragma(db, "journal_mode = WAL")
                         setPragma(db, "synchronous = NORMAL")
                     }
+
+                    private fun repairInterimCustomTitleMigration(db: SupportSQLiteDatabase) {
+                        fun hasColumn(table: String, column: String): Boolean {
+                            return db.query("PRAGMA table_info($table)").use { cursor ->
+                                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                                generateSequence { cursor.takeIf { it.moveToNext() } }
+                                    .any { it.getString(nameIndex) == column }
+                            }
+                        }
+
+                        // An interim debug build used migration 28 for chapter-title editing.
+                        // Repair those databases before SQLDelight queries the current schema.
+                        if (!hasColumn("mangas", "custom_title")) {
+                            db.execSQL("ALTER TABLE mangas ADD COLUMN custom_title TEXT")
+                        }
+                        if (hasColumn("libraryView", "custom_title")) return
+
+                        db.execSQL("DROP VIEW IF EXISTS libraryView")
+                        db.execSQL(
+                            """
+                            CREATE VIEW libraryView AS
+                            SELECT
+                                M.*,
+                                coalesce(C.total, 0) AS totalCount,
+                                coalesce(C.readCount, 0) AS readCount,
+                                coalesce(C.latestUpload, 0) AS latestUpload,
+                                coalesce(C.fetchedAt, 0) AS chapterFetchedAt,
+                                coalesce(C.lastRead, 0) AS lastRead,
+                                coalesce(C.bookmarkCount, 0) AS bookmarkCount,
+                                coalesce(MC.category_id, 0) AS category
+                            FROM mangas M
+                            LEFT JOIN(
+                                SELECT
+                                    chapters.manga_id,
+                                    count(*) AS total,
+                                    sum(read) AS readCount,
+                                    coalesce(max(chapters.date_upload), 0) AS latestUpload,
+                                    coalesce(max(history.last_read), 0) AS lastRead,
+                                    coalesce(max(chapters.date_fetch), 0) AS fetchedAt,
+                                    sum(chapters.bookmark) AS bookmarkCount
+                                FROM chapters
+                                LEFT JOIN excluded_scanlators
+                                ON chapters.manga_id = excluded_scanlators.manga_id
+                                AND chapters.scanlator = excluded_scanlators.scanlator
+                                LEFT JOIN history
+                                ON chapters._id = history.chapter_id
+                                WHERE excluded_scanlators.scanlator IS NULL
+                                GROUP BY chapters.manga_id
+                            ) AS C
+                            ON M._id = C.manga_id
+                            LEFT JOIN mangas_categories AS MC
+                            ON MC.manga_id = M._id
+                            WHERE M.favorite = 1
+                            """.trimIndent(),
+                        )
+                    }
+
                     private fun setPragma(db: SupportSQLiteDatabase, pragma: String) {
                         val cursor = db.query("PRAGMA $pragma")
                         cursor.moveToFirst()

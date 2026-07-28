@@ -85,6 +85,7 @@
     <string name="action_enable_all">Enable all</string>
     <string name="action_disable_all">Disable all</string>
     <string name="action_edit">Edit</string>
+    <string name="action_edit_title">Edit title</string>
     <string name="action_add">Add</string>
     <string name="action_update_category">Update category</string>
     <string name="action_open_random_manga">Open random entry</string>
@@ -727,6 +728,9 @@
     <string name="unfinished_list">Unfinished List</string>
     <string name="score">Score</string>
     <string name="title">Title</string>
+    <string name="edit_manga_title">Edit series title</string>
+    <string name="manga_title_edit_help">Changes how this series title is displayed. Reset restores the title from the source.</string>
+    <string name="manga_title_update_failed">Could not update the series title because its download folder could not be renamed.</string>
     <string name="status">Status</string>
     <string name="track_status">Status</string>
     <string name="track_started_reading_date">Start date</string>

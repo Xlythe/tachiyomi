@@ -65,6 +65,10 @@ class MangaRepositoryImpl(
         }
     }
 
+    override suspend fun getSourceTitle(mangaId: Long): String {
+        return handler.awaitOne { mangasQueries.getSourceTitle(mangaId) }
+    }
+
     override suspend fun resetViewerFlags(): Boolean {
         return try {
             handler.await { mangasQueries.resetViewerFlags() }
@@ -124,6 +128,16 @@ class MangaRepositoryImpl(
     override suspend fun updateAll(mangaUpdates: List<MangaUpdate>): Boolean {
         return try {
             partialUpdate(*mangaUpdates.toTypedArray())
+            true
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
+            false
+        }
+    }
+
+    override suspend fun updateCustomTitle(mangaId: Long, customTitle: String?): Boolean {
+        return try {
+            handler.await { mangasQueries.updateCustomTitle(customTitle, mangaId) }
             true
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
