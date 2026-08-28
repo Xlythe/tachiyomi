@@ -171,6 +171,26 @@ class ChapterCache(
     }
 
     /**
+     * Page lists are produced by extensions and may change when an extension is
+     * updated (for example, when a source starts filtering unwanted pages).
+     * Invalidate the shared page/image cache whenever the installed extension
+     * versions change so an old page list cannot bypass the updated source.
+     */
+    @Synchronized
+    fun invalidateIfExtensionFingerprintChanged(fingerprint: String): Boolean {
+        val marker = File(context.filesDir, EXTENSION_FINGERPRINT_FILE)
+        val previous = runCatching { marker.readText() }.getOrNull()
+        if (previous == fingerprint) return false
+
+        clear()
+        runCatching { marker.writeText(fingerprint) }
+            .onFailure { error ->
+                logcat(LogPriority.WARN, error) { "Failed to store the chapter cache extension fingerprint" }
+            }
+        return true
+    }
+
+    /**
      * Remove file from cache.
      *
      * @param file name of file "md5.0".
@@ -206,3 +226,5 @@ private const val PARAMETER_VALUE_COUNT = 1
 
 /** The maximum number of bytes this cache should use to store.  */
 private const val PARAMETER_CACHE_SIZE = 100L * 1024 * 1024
+
+private const val EXTENSION_FINGERPRINT_FILE = "chapter_cache_extension_fingerprint"

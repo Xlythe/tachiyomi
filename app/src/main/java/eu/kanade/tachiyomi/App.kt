@@ -31,6 +31,7 @@ import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
+import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.di.AppModule
 import eu.kanade.tachiyomi.di.PreferenceModule
@@ -162,6 +163,11 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
 
     override fun onStart(owner: LifecycleOwner) {
         SecureActivityDelegate.onApplicationStart()
+
+        // Reconcile the persisted interval with WorkManager whenever the app is opened.
+        // This repairs a missing periodic worker after an app restore or reinstall while
+        // ExistingPeriodicWorkPolicy.UPDATE preserves the timing of a healthy worker.
+        LibraryUpdateJob.setupTask(this)
     }
 
     override fun onStop(owner: LifecycleOwner) {

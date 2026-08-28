@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.drawable.Drawable
 import eu.kanade.domain.extension.interactor.TrustExtension
 import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.extension.api.ExtensionApi
 import eu.kanade.tachiyomi.extension.api.ExtensionUpdateNotifier
 import eu.kanade.tachiyomi.extension.model.Extension
@@ -39,6 +40,7 @@ class ExtensionManager(
     private val context: Context,
     private val preferences: SourcePreferences = Injekt.get(),
     private val trustExtension: TrustExtension = Injekt.get(),
+    private val chapterCache: ChapterCache = Injekt.get(),
 ) {
 
     var isInitialized = false
@@ -107,6 +109,8 @@ class ExtensionManager(
         _untrustedExtensionsFlow.value = extensions
             .filterIsInstance<LoadResult.Untrusted>()
             .map { it.extension }
+
+        invalidateChapterCacheIfExtensionsChanged()
 
         isInitialized = true
     }
@@ -271,12 +275,19 @@ class ExtensionManager(
         _untrustedExtensionsFlow.value -= nowTrustedExtensions
 
         launchNow {
+            var registeredAny = false
             nowTrustedExtensions
                 .map { extension ->
                     async { ExtensionLoader.loadExtensionFromPkgName(context, extension.pkgName) }.await()
                 }
                 .filterIsInstance<LoadResult.Success>()
-                .forEach { registerNewExtension(it.extension) }
+                .forEach {
+                    registerNewExtension(it.extension)
+                    registeredAny = true
+                }
+            if (registeredAny) {
+                invalidateChapterCacheIfExtensionsChanged()
+            }
         }
     }
 
@@ -329,11 +340,13 @@ class ExtensionManager(
 
         override fun onExtensionInstalled(extension: Extension.Installed) {
             registerNewExtension(extension.withUpdateCheck())
+            invalidateChapterCacheIfExtensionsChanged()
             updatePendingUpdatesCount()
         }
 
         override fun onExtensionUpdated(extension: Extension.Installed) {
             registerUpdatedExtension(extension.withUpdateCheck())
+            invalidateChapterCacheIfExtensionsChanged()
             updatePendingUpdatesCount()
         }
 
@@ -344,8 +357,16 @@ class ExtensionManager(
         override fun onPackageUninstalled(pkgName: String) {
             ExtensionLoader.uninstallPrivateExtension(context, pkgName)
             unregisterExtension(pkgName)
+            invalidateChapterCacheIfExtensionsChanged()
             updatePendingUpdatesCount()
         }
+    }
+
+    private fun invalidateChapterCacheIfExtensionsChanged() {
+        val fingerprint = _installedExtensionsFlow.value
+            .sortedBy { it.pkgName }
+            .joinToString(separator = "\n") { "${it.pkgName}:${it.versionCode}" }
+        chapterCache.invalidateIfExtensionFingerprintChanged(fingerprint)
     }
 
     /**

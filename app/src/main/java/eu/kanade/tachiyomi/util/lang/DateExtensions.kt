@@ -8,7 +8,6 @@ import java.text.DateFormat
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
 import java.util.Calendar
 import java.util.Date
 
@@ -39,8 +38,9 @@ fun Long.convertEpochMillisZone(
  * @return date as time key
  */
 fun Long.toDateKey(): Date {
-    val instant = Instant.ofEpochMilli(this)
-    return Date.from(instant.truncatedTo(ChronoUnit.DAYS))
+    val zone = ZoneId.systemDefault()
+    val localDate = Instant.ofEpochMilli(this).atZone(zone).toLocalDate()
+    return Date.from(localDate.atStartOfDay(zone).toInstant())
 }
 
 fun Date.toRelativeString(

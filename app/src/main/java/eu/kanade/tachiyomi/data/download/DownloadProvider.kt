@@ -171,9 +171,22 @@ class DownloadProvider(
                 // Previously null scanlator fields were converted to "" due to a bug
                 add("_$chapterDirName")
                 add("_$chapterDirName.cbz")
+
+                // Some sources historically serialized their missing scanlator as "Unknown".
+                val unknownScanlatorName = getChapterDirName(chapterName, "Unknown")
+                add(unknownScanlatorName)
+                add("$unknownScanlatorName.cbz")
             } else {
                 // Legacy chapter directory name used in v0.9.2 and before
-                add(DiskUtil.buildValidFilename(chapterName))
+                val legacyChapterName = DiskUtil.buildValidFilename(chapterName)
+                add(legacyChapterName)
+                add("$legacyChapterName.cbz")
+
+                if (chapterScanlator.equals("Unknown", ignoreCase = true)) {
+                    val noScanlatorName = getChapterDirName(chapterName, null)
+                    add(noScanlatorName)
+                    add("$noScanlatorName.cbz")
+                }
             }
         }
     }

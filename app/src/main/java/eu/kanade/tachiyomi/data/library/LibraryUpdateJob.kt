@@ -22,6 +22,7 @@ import eu.kanade.domain.manga.model.toSManga
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.notification.Notifications
+import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.util.shouldContinueDownloadingUnreadChapters
@@ -39,6 +40,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.serialization.json.Json
 import logcat.LogPriority
 import tachiyomi.core.i18n.stringResource
 import tachiyomi.core.preference.getAndSet
@@ -91,6 +93,11 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private val syncChaptersWithSource: SyncChaptersWithSource = Injekt.get()
     private val getChaptersByMangaId: GetChaptersByMangaId = Injekt.get()
     private val fetchInterval: FetchInterval = Injekt.get()
+    private val recentUpdatesChecker = RecentUpdatesChecker()
+    private val recentUpdatesCheckpointStore = RecentUpdatesCheckpointStore(
+        libraryPreferences = libraryPreferences,
+        json = Injekt.get<Json>(),
+    )
 
     private val notifier = LibraryUpdateNotifier(context)
 
@@ -233,8 +240,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                 },
             )
 
-        notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate)
-
         if (skippedUpdates.isNotEmpty()) {
             // TODO: surface skipped reasons to user?
             logcat {
@@ -262,12 +267,35 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         val failedUpdates = CopyOnWriteArrayList<Pair<Manga, String?>>()
         val hasDownloads = AtomicBoolean(false)
         val fetchWindow = fetchInterval.getWindow(ZonedDateTime.now())
+        val recentUpdatesScans = scanRecentUpdatesBySource()
+
+        if (recentUpdatesScans.isNotEmpty()) {
+            val originalQueueSize = mangaToUpdate.size
+            mangaToUpdate = mangaToUpdate.filter { libraryManga ->
+                val scan = recentUpdatesScans[libraryManga.manga.source] ?: return@filter true
+                scan.requiresFullUpdate ||
+                    RecentUpdatesChecker.normalizeMangaUrl(libraryManga.manga.url) in scan.mangaUrls.orEmpty()
+            }
+            logcat(LogPriority.INFO) {
+                "Latest-feed scan selected ${mangaToUpdate.size} of $originalQueueSize library manga"
+            }
+
+            val queuedSourceIds = mangaToUpdate.mapTo(mutableSetOf()) { it.manga.source }
+            recentUpdatesScans
+                .filterKeys { it !in queuedSourceIds }
+                .forEach { (sourceId, scan) ->
+                    scan.checkpoint?.let { recentUpdatesCheckpointStore.set(sourceId, it) }
+                }
+        }
+
+        notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate)
 
         coroutineScope {
             mangaToUpdate.groupBy { it.manga.source }.values
                 .map { mangaInSource ->
                     async {
                         semaphore.withPermit {
+                            var sourceHadFailures = false
                             mangaInSource.forEach { libraryManga ->
                                 val manga = libraryManga.manga
                                 logcat(LogPriority.INFO, message = { "Updating ${manga.title}" })
@@ -307,6 +335,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                             newUpdates.add(manga to newChapters.toTypedArray())
                                         }
                                     } catch (e: Throwable) {
+                                        sourceHadFailures = true
                                         val errorMessage = when (e) {
                                             is NoChaptersException -> context.stringResource(
                                                 MR.strings.no_chapters_error,
@@ -320,6 +349,17 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                         failedUpdates.add(manga to errorMessage)
                                     }
                                 }
+                            }
+
+                            if (!sourceHadFailures) {
+                                recentUpdatesScans[mangaInSource.first().manga.source]
+                                    ?.checkpoint
+                                    ?.let { checkpoint ->
+                                        recentUpdatesCheckpointStore.set(
+                                            mangaInSource.first().manga.source,
+                                            checkpoint,
+                                        )
+                                    }
                             }
                         }
                     }
@@ -345,6 +385,44 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         }
     }
 
+    private suspend fun scanRecentUpdatesBySource(): Map<Long, RecentUpdatesScanResult> {
+        if (WORK_NAME_AUTO !in tags) return emptyMap()
+
+        val semaphore = Semaphore(5)
+        return coroutineScope {
+            mangaToUpdate
+                .groupBy { it.manga.source }
+                .mapNotNull { (sourceId, mangaInSource) ->
+                    val source = sourceManager.get(sourceId) as? CatalogueSource
+                    if (source?.supportsLatest != true) return@mapNotNull null
+
+                    async {
+                        semaphore.withPermit {
+                            val libraryManga = mangaInSource.map { item ->
+                                RecentUpdatesLibraryManga(
+                                    id = item.manga.id,
+                                    mangaUrl = RecentUpdatesChecker.normalizeMangaUrl(item.manga.url),
+                                )
+                            }
+                            val scan = recentUpdatesChecker.scan(
+                                previous = recentUpdatesCheckpointStore.get(sourceId),
+                                libraryManga = libraryManga,
+                            ) { page ->
+                                source.getLatestUpdates(page)
+                            }
+                            logcat(LogPriority.INFO) {
+                                val mode = if (scan.requiresFullUpdate) "full" else "filtered"
+                                "Latest-feed scan for ${source.name}: $mode update after ${scan.pagesScanned} page(s)"
+                            }
+                            sourceId to scan
+                        }
+                    }
+                }
+                .awaitAll()
+                .toMap()
+        }
+    }
+
     private fun downloadChapters(manga: Manga, chapters: List<Chapter>) {
         downloadManager.downloadChapters(manga, chapters, true)
     }
@@ -361,7 +439,14 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         // Update manga metadata if needed
         if (libraryPreferences.autoUpdateMetadata().get()) {
             val networkManga = source.getMangaDetails(manga.toSManga())
-            updateManga.awaitUpdateFromSource(manga, networkManga, manualFetch = false, coverCache)
+            updateManga.awaitUpdateFromSource(
+                manga,
+                networkManga,
+                manualFetch = false,
+                coverCache,
+            ) { oldTitle, newTitle ->
+                downloadManager.renameManga(source, oldTitle, newTitle)
+            }
         }
 
         val chapters = source.getChapterList(manga.toSManga())

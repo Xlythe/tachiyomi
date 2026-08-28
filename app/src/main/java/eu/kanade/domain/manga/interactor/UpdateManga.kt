@@ -31,6 +31,7 @@ class UpdateManga(
         remoteManga: SManga,
         manualFetch: Boolean,
         coverCache: CoverCache = Injekt.get(),
+        migrateDownloads: (oldTitle: String, newTitle: String) -> Boolean = { _, _ -> true },
     ): Boolean {
         val remoteTitle = try {
             remoteManga.title
@@ -64,7 +65,12 @@ class UpdateManga(
 
         val thumbnailUrl = remoteManga.thumbnail_url?.takeIf { it.isNotEmpty() }
 
-        return mangaRepository.update(
+        val migratedTitle = title?.takeIf { it != localManga.title }
+        if (migratedTitle != null && !migrateDownloads(localManga.title, migratedTitle)) {
+            return false
+        }
+
+        val updated = mangaRepository.update(
             MangaUpdate(
                 id = localManga.id,
                 title = title,
@@ -79,6 +85,11 @@ class UpdateManga(
                 initialized = true,
             ),
         )
+
+        if (!updated && migratedTitle != null) {
+            migrateDownloads(migratedTitle, localManga.title)
+        }
+        return updated
     }
 
     suspend fun awaitUpdateFetchInterval(

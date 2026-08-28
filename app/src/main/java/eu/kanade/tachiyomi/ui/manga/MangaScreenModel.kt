@@ -262,7 +262,9 @@ class MangaScreenModel(
         try {
             withIOContext {
                 val networkManga = state.source.getMangaDetails(state.manga.toSManga())
-                updateManga.awaitUpdateFromSource(state.manga, networkManga, manualFetch)
+                updateManga.awaitUpdateFromSource(state.manga, networkManga, manualFetch) { oldTitle, newTitle ->
+                    downloadManager.renameManga(state.source, oldTitle, newTitle)
+                }
             }
         } catch (e: Throwable) {
             // Ignore early hints "errors" that aren't handled by OkHttp

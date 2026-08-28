@@ -31,6 +31,12 @@ class LibraryPreferences(
     fun landscapeColumns() = preferenceStore.getInt("pref_library_columns_landscape_key", 0)
 
     fun lastUpdatedTimestamp() = preferenceStore.getLong(Preference.appStateKey("library_update_last_timestamp"), 0L)
+
+    fun recentUpdatesCheckpoint(sourceId: Long) = preferenceStore.getString(
+        Preference.appStateKey("library_update_recent_checkpoint_$sourceId"),
+        "",
+    )
+
     fun autoUpdateInterval() = preferenceStore.getInt("pref_library_update_interval_key", 0)
 
     fun autoUpdateDeviceRestrictions() = preferenceStore.getStringSet(

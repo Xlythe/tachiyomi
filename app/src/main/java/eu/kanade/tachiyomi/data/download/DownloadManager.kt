@@ -228,12 +228,30 @@ class DownloadManager(
             removeFromDownloadQueue(filteredChapters)
 
             val (mangaDir, chapterDirs) = provider.findChapterDirs(filteredChapters, manga, source)
+            val selectedEntryNames = filteredChapters
+                .flatMap { provider.getValidChapterDirNames(it.name, it.scanlator) }
+                .toSet()
+            val mangaEntries = mangaDir?.listFiles().orEmpty()
+
+            // Deleting every CBZ/folder separately is very slow on shared storage because each
+            // operation triggers its own MediaProvider update. When every entry belongs to the
+            // explicit selection, remove the manga directory in one operation instead.
+            if (
+                mangaDir != null &&
+                shouldDeleteEntireMangaDownload(mangaEntries.map { it.name }, selectedEntryNames) &&
+                mangaDir.delete()
+            ) {
+                cache.removeManga(manga)
+                deleteSourceDirectoryIfEmpty(source)
+                return@launchIO
+            }
+
             chapterDirs.forEach { it.delete() }
             cache.removeChapters(filteredChapters, manga)
 
             // Delete manga directory if empty
             if (mangaDir?.listFiles()?.isEmpty() == true) {
-                deleteManga(manga, source, removeQueued = false)
+                deleteMangaNow(manga, source, removeQueued = false)
             }
         }
     }
@@ -247,18 +265,24 @@ class DownloadManager(
      */
     fun deleteManga(manga: Manga, source: Source, removeQueued: Boolean = true) {
         launchIO {
-            if (removeQueued) {
-                downloader.removeFromQueue(manga)
-            }
-            provider.findMangaDir(manga.title, source)?.delete()
-            cache.removeManga(manga)
+            deleteMangaNow(manga, source, removeQueued)
+        }
+    }
 
-            // Delete source directory if empty
-            val sourceDir = provider.findSourceDir(source)
-            if (sourceDir?.listFiles()?.isEmpty() == true) {
-                sourceDir.delete()
-                cache.removeSource(source)
-            }
+    private suspend fun deleteMangaNow(manga: Manga, source: Source, removeQueued: Boolean) {
+        if (removeQueued) {
+            downloader.removeFromQueue(manga)
+        }
+        provider.findMangaDir(manga.title, source)?.delete()
+        cache.removeManga(manga)
+        deleteSourceDirectoryIfEmpty(source)
+    }
+
+    private suspend fun deleteSourceDirectoryIfEmpty(source: Source) {
+        val sourceDir = provider.findSourceDir(source)
+        if (sourceDir?.listFiles()?.isEmpty() == true) {
+            sourceDir.delete()
+            cache.removeSource(source)
         }
     }
 
@@ -446,3 +470,10 @@ class DownloadManager(
             )
         }
 }
+
+internal fun shouldDeleteEntireMangaDownload(
+    mangaEntryNames: List<String?>,
+    selectedEntryNames: Set<String>,
+): Boolean =
+    mangaEntryNames.isNotEmpty() &&
+        mangaEntryNames.all { entryName -> entryName != null && entryName in selectedEntryNames }

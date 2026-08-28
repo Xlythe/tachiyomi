@@ -108,7 +108,10 @@ class DownloadCache(
                             ProtoBuf.decodeFromByteArray<RootDirectory>(it.readBytes())
                         }
                         rootDownloadsDir = diskCache
-                        lastRenew = System.currentTimeMillis()
+                        // Use the persisted snapshot immediately, but always reconcile it with
+                        // storage once extensions are available. The app may have been stopped
+                        // while downloads were added, moved, or restored.
+                        lastRenew = 0L
                     }
                 } catch (e: Throwable) {
                     logcat(LogPriority.ERROR, e) { "Failed to initialize disk cache" }
@@ -155,6 +158,7 @@ class DownloadCache(
                 ).any { it in mangaDir.chapterDirs }
             }
         }
+
         return false
     }
 
@@ -310,31 +314,31 @@ class DownloadCache(
                 _isInitializing.emit(true)
             }
 
-            // Try to wait until extensions and sources have loaded
-            var sources = getSources()
-            if (sources.isEmpty()) {
+            // Source folder names are mapped to source IDs below. Scanning before extension
+            // initialization can produce a valid-looking but incomplete cache that hides downloads.
+            if (!extensionManager.isInitialized) {
                 withTimeoutOrNull(30.seconds) {
                     while (!extensionManager.isInitialized) {
                         delay(2.seconds)
                     }
-
-                    while (extensionManager.availableExtensionsFlow.value.isNotEmpty() && sources.isEmpty()) {
-                        delay(2.seconds)
-                        sources = getSources()
-                    }
                 }
             }
+            val sources = getSources()
 
-            val sourceMap = sources.associate { provider.getSourceDirName(it).lowercase() to it.id }
+            val sourceMap = sources.groupBy(
+                keySelector = { provider.getSourceDirName(it).lowercase() },
+                valueTransform = { it.id },
+            )
 
             rootDownloadsDirLock.withLock {
                 rootDownloadsDir = RootDirectory(storageManager.getDownloadsDirectory())
 
                 val sourceDirs = rootDownloadsDir.dir?.listFiles().orEmpty()
                     .filter { it.isDirectory && !it.name.isNullOrBlank() }
-                    .mapNotNull { dir ->
-                        val sourceId = sourceMap[dir.name!!.lowercase()]
-                        sourceId?.let { it to SourceDirectory(dir) }
+                    .flatMap { dir ->
+                        sourceMap[dir.name!!.lowercase()]
+                            .orEmpty()
+                            .map { sourceId -> sourceId to SourceDirectory(dir) }
                     }
                     .toMap()
 
