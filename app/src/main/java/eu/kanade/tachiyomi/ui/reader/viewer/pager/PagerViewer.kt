@@ -61,7 +61,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         if (!page.isHidden || currentPage !== page) return
         pager.post {
             if (currentPage === page && page.isHidden) {
-                if (movingForward) moveToNext() else moveToPrevious()
+                // Bypass image panning, including while the old bitmap is still being replaced.
+                val step = if (movingForward != (this is R2LPagerViewer)) 1 else -1
+                val destination = pager.currentItem + step
+                if (destination in adapter.items.indices) pager.setCurrentItem(destination, false)
             }
         }
     }
@@ -186,6 +189,11 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
     private fun onPageChange(position: Int) {
         val page = adapter.items.getOrNull(position)
         if (page != null && currentPage != page) {
+            val previousPosition = currentPage?.let { adapter.items.indexOf(it) } ?: -1
+            if (previousPosition >= 0 && previousPosition != position) {
+                // Page numbers restart at chapter boundaries; adapter order preserves direction.
+                movingForward = (position > previousPosition) != (this is R2LPagerViewer)
+            }
             val allowPreload = checkAllowPreload(page as? ReaderPage)
             val forward = when {
                 currentPage is ReaderPage && page is ReaderPage -> {
@@ -233,7 +241,6 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * activity of the change and requests the preload of the next chapter if this is the last page.
      */
     private fun onReaderPageSelected(page: ReaderPage, allowPreload: Boolean, forward: Boolean) {
-        movingForward = forward
         skipHiddenPage(page)
         val pages = page.chapter.pages ?: return
         logcat { "onReaderPageSelected: ${page.number}/${pages.size}" }
