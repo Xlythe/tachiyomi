@@ -6,6 +6,6 @@ class InsertPage(val parent: ReaderPage) : ReaderPage(parent.index, parent.url, 
 
     init {
         status = State.READY
-        stream = parent.stream
+        stream = parent.originalStream
     }
 }

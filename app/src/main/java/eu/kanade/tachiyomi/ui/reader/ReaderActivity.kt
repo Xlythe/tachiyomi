@@ -44,6 +44,7 @@ import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
 import eu.kanade.presentation.reader.PageIndicatorText
 import eu.kanade.presentation.reader.ReaderContentOverlay
+import eu.kanade.presentation.reader.ReaderImageMaskDialog
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
 import eu.kanade.presentation.reader.ReadingModeSelectDialog
 import eu.kanade.presentation.reader.appbars.ReaderAppBars
@@ -396,7 +397,7 @@ class ReaderActivity : BaseActivity() {
             }
 
             val onDismissRequest = viewModel::closeDialog
-            when (state.dialog) {
+            when (val dialog = state.dialog) {
                 is ReaderViewModel.Dialog.Loading -> {
                     AlertDialog(
                         onDismissRequest = {},
@@ -448,6 +449,25 @@ class ReaderActivity : BaseActivity() {
                         onSetAsCover = viewModel::setAsCover,
                         onShare = viewModel::shareImage,
                         onSave = viewModel::saveImage,
+                        onHide = viewModel::openImageMask,
+                    )
+                }
+                is ReaderViewModel.Dialog.ImageMask -> {
+                    ReaderImageMaskDialog(
+                        page = dialog.page,
+                        metadata = viewModel.imageRuleMetadata(dialog.page),
+                        onDismiss = onDismissRequest,
+                        onApplied = { hash ->
+                            com.google.android.material.snackbar.Snackbar.make(
+                                binding.root,
+                                stringResource(MR.strings.reader_image_rule_saved),
+                                com.google.android.material.snackbar.Snackbar.LENGTH_LONG,
+                            ).setAction(stringResource(MR.strings.reader_restore_image)) {
+                                lifecycleScope.launchIO {
+                                    eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules.remove(hash)
+                                }
+                            }.show()
+                        },
                     )
                 }
                 null -> {}

@@ -55,6 +55,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Currently active item. It can be a chapter page or a chapter transition.
      */
     private var currentPage: Any? = null
+    private var movingForward = true
+
+    fun skipHiddenPage(page: ReaderPage) {
+        if (!page.isHidden || currentPage !== page) return
+        pager.post {
+            if (currentPage === page && page.isHidden) {
+                if (movingForward) moveToNext() else moveToPrevious()
+            }
+        }
+    }
 
     /**
      * Viewer chapters to set when the pager enters idle mode. Otherwise, if the view was settling
@@ -223,6 +233,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * activity of the change and requests the preload of the next chapter if this is the last page.
      */
     private fun onReaderPageSelected(page: ReaderPage, allowPreload: Boolean, forward: Boolean) {
+        movingForward = forward
+        skipHiddenPage(page)
         val pages = page.chapter.pages ?: return
         logcat { "onReaderPageSelected: ${page.number}/${pages.size}" }
         activity.onPageSelected(page)

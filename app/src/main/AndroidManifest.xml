@@ -217,6 +217,11 @@
         </provider>
 
         <provider
+            android:name=".ui.reader.filter.ReaderImageRulesProvider"
+            android:authorities="${applicationId}.reader_image_rules"
+            android:exported="true" />
+
+        <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
             android:enabled="true"

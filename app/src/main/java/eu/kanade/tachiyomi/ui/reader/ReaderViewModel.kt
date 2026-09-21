@@ -742,7 +742,45 @@ class ReaderViewModel @JvmOverloads constructor(
     }
 
     fun openPageDialog(page: ReaderPage) {
-        mutableState.update { it.copy(dialog = Dialog.PageActions(page)) }
+        val original = (page as? eu.kanade.tachiyomi.ui.reader.model.InsertPage)?.parent ?: page
+        mutableState.update { it.copy(dialog = Dialog.PageActions(original)) }
+    }
+
+    fun openImageMask() {
+        val page = (state.value.dialog as? Dialog.PageActions)?.page ?: return
+        mutableState.update { it.copy(dialog = Dialog.ImageMask(page)) }
+    }
+
+    fun imageRuleMetadata(page: ReaderPage): org.json.JSONObject {
+        val manga = manga
+        val source = manga?.source?.let { sourceManager.getOrStub(it) }
+        val extension = Injekt.get<eu.kanade.tachiyomi.extension.ExtensionManager>()
+            .installedExtensionsFlow.value.find { ext -> ext.sources.any { it.id == manga?.source } }
+        val chapter = page.chapter.chapter
+        return org.json.JSONObject().apply {
+            put("seriesId", manga?.id)
+            put("seriesName", manga?.title)
+            put("seriesUrl", manga?.url)
+            put("chapterId", chapter.id)
+            put("chapterName", chapter.name)
+            put("chapterNumber", chapter.chapter_number.toDouble())
+            put("chapterUrl", chapter.url)
+            put("pageNumber", page.index + 1)
+            put("pageCount", page.chapter.pages?.size)
+            put("pageUrl", page.url)
+            put("imageUrl", page.imageUrl)
+            put("sourceId", manga?.source?.toString())
+            put("sourceName", source?.name)
+            put("sourceBaseUrl", (source as? HttpSource)?.baseUrl)
+            put("extensionName", extension?.name)
+            put("extensionPackage", extension?.pkgName)
+            put("extensionVersion", extension?.versionName)
+            put("extensionVersionCode", extension?.versionCode)
+            put("appVersion", eu.kanade.tachiyomi.BuildConfig.VERSION_NAME)
+            put("appCommit", eu.kanade.tachiyomi.BuildConfig.COMMIT_SHA)
+            put("imageStage", "reader-input-after-extension-processing")
+            put("pageNumberStage", "reader-list-after-extension-filtering")
+        }
     }
 
     fun openSettingsDialog() {
@@ -940,6 +978,7 @@ class ReaderViewModel @JvmOverloads constructor(
         data object ReadingModeSelect : Dialog
         data object OrientationModeSelect : Dialog
         data class PageActions(val page: ReaderPage) : Dialog
+        data class ImageMask(val page: ReaderPage) : Dialog
     }
 
     sealed interface Event {

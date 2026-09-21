@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import androidx.core.view.isVisible
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
@@ -15,6 +16,7 @@ import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import logcat.LogPriority
@@ -89,7 +91,7 @@ class PagerPageHolder(
             launchIO {
                 loader.loadPage(page)
             }
-            page.statusFlow.collectLatest { state ->
+            combine(page.statusFlow, ReaderImageRules.revision) { state, _ -> state }.collectLatest { state ->
                 when (state) {
                     Page.State.QUEUE -> setQueued()
                     Page.State.LOAD_PAGE -> setLoading()
@@ -156,6 +158,7 @@ class PagerPageHolder(
                 }
             }
             withUIContext {
+                viewer.skipHiddenPage(page)
                 bais.use {
                     setImage(
                         it,
@@ -183,6 +186,7 @@ class PagerPageHolder(
     }
 
     private fun process(page: ReaderPage, imageStream: BufferedInputStream): InputStream {
+        if (page.isHidden) return imageStream
         if (viewer.config.dualPageRotateToFit) {
             return rotateDualPage(imageStream)
         }

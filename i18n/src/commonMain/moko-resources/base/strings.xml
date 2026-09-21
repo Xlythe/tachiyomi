@@ -932,4 +932,11 @@
     <string name="exception_http">HTTP %d, check website in WebView</string>
     <string name="exception_offline">No Internet connection</string>
     <string name="exception_unknown_host">Couldn\'t reach %s</string>
+    <string name="reader_hide_image">Hide image</string>
+    <string name="reader_mask_instructions">Drag the edges of the shaded area to choose what to remove.</string>
+    <string name="reader_mask_all">Entire image will be hidden</string>
+    <string name="reader_mask_partial">Shaded area will be removed; remaining content will be joined</string>
+    <string name="reader_restore_image">Restore original</string>
+    <string name="reader_mask_apply">Apply</string>
+    <string name="reader_image_rule_saved">Image rule saved</string>
 </resources>

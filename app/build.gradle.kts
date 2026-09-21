@@ -16,7 +16,7 @@ android {
     defaultConfig {
         applicationId = "eu.kanade.tachiyomi"
 
-        versionCode = 119
+        versionCode = 120
         versionName = "0.15.3"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
@@ -243,6 +243,10 @@ dependencies {
 
     // Tests
     testImplementation(libs.bundles.test)
+    androidTestImplementation(androidx.test.ext)
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation(platform(compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.1")
 
     // For detecting memory leaks; see https://square.github.io/leakcanary/

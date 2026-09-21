@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -30,6 +31,7 @@ fun ReaderPageActionsDialog(
     onSetAsCover: () -> Unit,
     onShare: () -> Unit,
     onSave: () -> Unit,
+    onHide: () -> Unit,
 ) {
     var showSetCoverDialog by remember { mutableStateOf(false) }
 
@@ -63,6 +65,12 @@ fun ReaderPageActionsDialog(
                     onSave()
                     onDismissRequest()
                 },
+            )
+            ActionButton(
+                modifier = Modifier.weight(1f),
+                title = stringResource(MR.strings.reader_hide_image),
+                icon = Icons.Outlined.VisibilityOff,
+                onClick = onHide,
             )
         }
     }
