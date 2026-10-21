@@ -9,6 +9,8 @@ import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.security.MessageDigest
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -146,8 +148,8 @@ internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
             for (y in area.top until area.bottom) {
                 val dy = (y - cy) / ry
                 val span = rx * sqrt((1f - dy * dy).coerceAtLeast(0f))
-                val left = (cx - span).roundToInt().coerceAtLeast(1)
-                val right = (cx + span).roundToInt().coerceAtMost(width - 2)
+                val left = ceil(cx - span).toInt().coerceAtLeast(area.left)
+                val right = floor(cx + span).toInt().coerceAtMost(area.right - 1)
                 val a = result.getPixel(left - 1, y)
                 val b = result.getPixel(right + 1, y)
                 for (x in left..right) {

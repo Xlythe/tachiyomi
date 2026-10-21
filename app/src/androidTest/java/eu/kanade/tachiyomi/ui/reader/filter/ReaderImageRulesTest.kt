@@ -173,6 +173,8 @@ class ReaderImageRulesTest {
         ReaderImageRules.save(original, 2, 6, JSONObject().put("seriesName", "Portable test"))
         val archive = ByteArrayOutputStream().also { ReaderImageRules.exportArchive(it) }.toByteArray()
         ReaderImageRules.remove(ReaderImageRules.hash(original))
+        // Simulate an orphan left by an interrupted import before the index was committed.
+        ReaderImageRules.original(ReaderImageRules.hash(original)).writeBytes(byteArrayOf(1, 2, 3))
         assertEquals(1, ReaderImageRules.importArchive(archive.inputStream()))
         assertArrayEquals(original, ReaderImageRules.original(ReaderImageRules.hash(original)).readBytes())
         assertEquals(2, ReaderImageRules.find(ReaderImageRules.hash(original))!!.getInt("removeTop"))
@@ -207,6 +209,19 @@ class ReaderImageRulesTest {
         bitmap.recycle()
         ReaderImageRules.remove(ReaderImageRules.hash(original))
         assertArrayEquals(original, ReaderImageRules.open { original.inputStream() }.use { it.readBytes() })
+    }
+
+    @Test
+    fun oddHeightWatermarkNeverChangesPixelsOutsideItsBoundingBox() {
+        val bitmap = BitmapFactory.decodeByteArray(original, 0, original.size)
+            .copy(Bitmap.Config.ARGB_8888, true)
+        bitmap.setPixel(8, 5, android.graphics.Color.MAGENTA)
+        val bytes = encode(bitmap)
+        bitmap.recycle()
+        val rendered = ReaderImageMask(bytes).use { it.renderWatermark(Rect(2, 2, 8, 9)) }
+        val filtered = BitmapFactory.decodeByteArray(rendered, 0, rendered.size)!!
+        assertEquals(android.graphics.Color.MAGENTA, filtered.getPixel(8, 5))
+        filtered.recycle()
     }
 
     @Test

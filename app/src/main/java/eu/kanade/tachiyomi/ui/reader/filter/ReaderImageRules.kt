@@ -179,8 +179,8 @@ object ReaderImageRules {
                 val original = original(digest)
                 if (!original.exists()) {
                     created += original
-                    original.writeBytes(raw)
                 }
+                writeOriginal(digest, raw)
                 updated[digest] = rule
                 imported++
             }
@@ -200,6 +200,21 @@ object ReaderImageRules {
     fun original(hash: String): File {
         require(hash.matches(Regex("[0-9a-f]{64}")))
         return File(directory, "$hash.original")
+    }
+
+    private fun writeOriginal(digest: String, bytes: ByteArray) {
+        val file = original(digest)
+        // An interrupted first write can leave an orphan without an index record. Verify before reuse.
+        if (file.exists() && runCatching { hash(file.readBytes()) }.getOrNull() == digest) return
+        val atomic = AtomicFile(file)
+        val output = atomic.startWrite()
+        try {
+            output.write(bytes)
+            atomic.finishWrite(output)
+        } catch (error: Throwable) {
+            atomic.failWrite(output)
+            throw error
+        }
     }
 
     private fun persist(updated: Map<String, JSONObject>) {
@@ -263,17 +278,7 @@ object ReaderImageRules {
         }
         replacement.writeBytes(rendered)
         try {
-            if (!original(hash).exists()) {
-                val atomic = AtomicFile(original(hash))
-                val output = atomic.startWrite()
-                try {
-                    output.write(bytes)
-                    atomic.finishWrite(output)
-                } catch (error: Throwable) {
-                    atomic.failWrite(output)
-                    throw error
-                }
-            }
+            writeOriginal(hash, bytes)
             persist((rules() - (replacingHash ?: hash)) + (hash to rule))
         } catch (error: Throwable) {
             replacement.delete()
