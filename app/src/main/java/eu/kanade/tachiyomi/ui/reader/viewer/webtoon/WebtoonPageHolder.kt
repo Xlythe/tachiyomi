@@ -18,6 +18,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.dpToPx
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.collectLatest
@@ -186,15 +187,29 @@ class WebtoonPageHolder(
     private suspend fun setImage() {
         progressIndicator.setProgress(0)
 
-        val streamFn = page?.stream ?: return
+        val streamFn = page?.stream ?: return setError()
 
         try {
+            refreshLayoutParams()
             val (openStream, isAnimated) = withIOContext {
-                val stream = streamFn().buffered(16)
-                val openStream = process(stream)
-
-                val isAnimated = ImageUtil.isAnimatedAndSupported(stream)
-                Pair(openStream, isAnimated)
+                // Buffer the processed result so cancellation cannot leave a ZIP/file stream open.
+                streamFn().buffered(16).use { stream ->
+                    if (page?.isHidden == true) return@withIOContext Pair(byteArrayOf().inputStream(), false)
+                    process(stream).use { processed ->
+                        val buffered = processed.readBytes().inputStream()
+                        val animated = ImageUtil.isAnimatedAndSupported(buffered)
+                        buffered.reset()
+                        Pair(buffered, animated)
+                    }
+                }
+            }
+            if (page?.isHidden == true) {
+                openStream.close()
+                frame.recycle()
+                progressContainer.isVisible = false
+                removeErrorLayout()
+                frame.updateLayoutParams { height = 1 }
+                return
             }
             withUIContext {
                 frame.setImage(
@@ -213,6 +228,7 @@ class WebtoonPageHolder(
                 continuation.invokeOnCancellation { openStream.close() }
             }
         } catch (e: Throwable) {
+            if (e is CancellationException) throw e
             logcat(LogPriority.ERROR, e)
             withUIContext {
                 setError()

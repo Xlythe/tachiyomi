@@ -13,6 +13,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.collectLatest
@@ -77,6 +78,11 @@ class PagerPageHolder(
         loadJob = null
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (loadJob == null) loadJob = scope.launch { loadPageAndProcessStatus() }
+    }
+
     /**
      * Loads the page and processes changes to the page's status.
      *
@@ -138,11 +144,12 @@ class PagerPageHolder(
     private suspend fun setImage() {
         progressIndicator.setProgress(0)
 
-        val streamFn = page.stream ?: return
+        val streamFn = page.stream ?: return setError()
 
         try {
             val (bais, isAnimated, background) = withIOContext {
                 streamFn().buffered(16).use { stream ->
+                    if (page.isHidden) return@withIOContext Triple(ByteArrayInputStream(byteArrayOf()), false, null)
                     process(item, stream).use { itemStream ->
                         val bais = ByteArrayInputStream(itemStream.readBytes())
                         val isAnimated = ImageUtil.isAnimatedAndSupported(bais)
@@ -159,6 +166,13 @@ class PagerPageHolder(
             }
             withUIContext {
                 viewer.skipHiddenPage(page)
+                if (page.isHidden) {
+                    bais.close()
+                    recycle()
+                    progressIndicator.hide()
+                    removeErrorLayout()
+                    return@withUIContext
+                }
                 bais.use {
                     setImage(
                         it,
@@ -178,6 +192,7 @@ class PagerPageHolder(
                 removeErrorLayout()
             }
         } catch (e: Throwable) {
+            if (e is CancellationException) throw e
             logcat(LogPriority.ERROR, e)
             withUIContext {
                 setError()

@@ -30,6 +30,8 @@ open class ReaderPage(
 
     @Volatile
     private var matchedRevision = -1L
+
+    @Volatile
     private var hidden = false
     val isHidden: Boolean get() = hidden && matchedRevision == ReaderImageRules.revision.value
 

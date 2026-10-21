@@ -2,9 +2,11 @@ package eu.kanade.tachiyomi.ui.reader.filter
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Rect
 import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -15,6 +17,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 @RunWith(AndroidJUnit4::class)
 class ReaderImageRulesTest {
@@ -141,4 +145,125 @@ class ReaderImageRulesTest {
     private fun encode(bitmap: Bitmap) = ByteArrayOutputStream().also {
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
     }.toByteArray()
+
+    @Test
+    fun repeatedDownloadedStreamsCloseAndHiddenStateTracksRestore() {
+        ReaderImageRules.save(original, 0, 10, JSONObject())
+        var closes = 0
+        val page = ReaderPage(0, stream = {
+            object : java.io.ByteArrayInputStream(original) {
+                override fun close() {
+                    closes++
+                    super.close()
+                }
+            }
+        })
+        repeat(5) {
+            page.stream!!().use { it.readBytes() }
+            assertTrue(page.isHidden)
+        }
+        assertEquals(5, closes)
+        ReaderImageRules.remove(ReaderImageRules.hash(original))
+        assertFalse(page.isHidden)
+        assertArrayEquals(original, page.stream!!().use { it.readBytes() })
+    }
+
+    @Test
+    fun portableArchiveRoundTripsAndDuplicateImportKeepsLocalChoice() {
+        ReaderImageRules.save(original, 2, 6, JSONObject().put("seriesName", "Portable test"))
+        val archive = ByteArrayOutputStream().also { ReaderImageRules.exportArchive(it) }.toByteArray()
+        ReaderImageRules.remove(ReaderImageRules.hash(original))
+        assertEquals(1, ReaderImageRules.importArchive(archive.inputStream()))
+        assertArrayEquals(original, ReaderImageRules.original(ReaderImageRules.hash(original)).readBytes())
+        assertEquals(2, ReaderImageRules.find(ReaderImageRules.hash(original))!!.getInt("removeTop"))
+        ReaderImageRules.save(original, 0, 3, JSONObject())
+        assertEquals(0, ReaderImageRules.importArchive(archive.inputStream()))
+        assertEquals(0, ReaderImageRules.find(ReaderImageRules.hash(original))!!.getInt("removeTop"))
+    }
+
+    @Test
+    fun malformedAndInterruptedArchivesLeaveExistingRulesUntouched() {
+        ReaderImageRules.save(original, 2, 6, JSONObject())
+        val before = ReaderImageRules.export()
+        val malicious = ByteArrayOutputStream().also { output ->
+            ZipOutputStream(output).use {
+                it.putNextEntry(ZipEntry("../rules.json"))
+                it.write("[]".toByteArray())
+            }
+        }.toByteArray()
+        assertTrue(runCatching { ReaderImageRules.importArchive(malicious.inputStream()) }.isFailure)
+        assertTrue(runCatching { ReaderImageRules.importArchive(byteArrayOf(1, 2, 3).inputStream()) }.isFailure)
+        assertEquals(before, ReaderImageRules.export())
+    }
+
+    @Test
+    fun watermarkPreservesOutsideEllipseAndRestoresOriginalBytes() {
+        ReaderImageRules.save(original, 0, 10, JSONObject(), watermark = Rect(2, 2, 8, 8))
+        val bitmap = ReaderImageRules.open { original.inputStream() }.use { BitmapFactory.decodeStream(it) }!!
+        assertEquals(10, bitmap.height)
+        assertEquals(pixel(0, 4), bitmap.getPixel(0, 4))
+        assertEquals(pixel(11, 4), bitmap.getPixel(11, 4))
+        assertFalse(ReaderImageRules.find(ReaderImageRules.hash(original))!!.getBoolean("hide"))
+        bitmap.recycle()
+        ReaderImageRules.remove(ReaderImageRules.hash(original))
+        assertArrayEquals(original, ReaderImageRules.open { original.inputStream() }.use { it.readBytes() })
+    }
+
+    @Test
+    fun adjacentAndOverlappingMasksRenderFromOriginalCoordinates() {
+        ReaderImageMask(original).use { image ->
+            val rendered = image.render(listOf(1..3, 3..5, 6..6))
+            val bitmap = BitmapFactory.decodeByteArray(rendered, 0, rendered.size)!!
+            assertEquals(4, bitmap.height)
+            assertEquals(pixel(4, 0), bitmap.getPixel(4, 0))
+            assertEquals(pixel(4, 7), bitmap.getPixel(4, 1))
+            bitmap.recycle()
+        }
+    }
+
+    @Test
+    fun learnedWholeSpamMatchesReencodedResizedAndSplitPagesButNotBlankArt() {
+        val spam = Bitmap.createBitmap(480, 600, Bitmap.Config.ARGB_8888)
+        for (y in 0 until 600) for (x in 0 until 480) {
+            val seed = (x / 10 * 73856093) xor (y / 10 * 19349663)
+            spam.setPixel(x, y, 0xff000000.toInt() or (seed and 0x00ffffff))
+        }
+        val raw = encode(spam)
+        val hash = ReaderImageRules.hash(raw)
+        try {
+            ReaderImageRules.save(raw, 0, 600, JSONObject())
+            val jpeg = ByteArrayOutputStream().also { spam.compress(Bitmap.CompressFormat.JPEG, 100, it) }.toByteArray()
+            var hidden = false
+            ReaderImageRules.open(onMatch = { hidden = it }) { jpeg.inputStream() }.close()
+            assertTrue(hidden)
+            val resized = Bitmap.createScaledBitmap(spam, 960, 1200, false)
+            ReaderImageRules.open(onMatch = { hidden = it }) { encode(resized).inputStream() }.close()
+            resized.recycle()
+            assertTrue(hidden)
+            for (atTop in listOf(true, false)) {
+                val page = Bitmap.createBitmap(480, 900, Bitmap.Config.ARGB_8888)
+                page.eraseColor(android.graphics.Color.YELLOW)
+                for (y in 0 until 300) for (x in 0 until 480) {
+                    page.setPixel(x, if (atTop) y else 600 + y, spam.getPixel(x, if (atTop) 300 + y else y))
+                }
+                val bytes = encode(page)
+                val filtered = ReaderImageRules.open { bytes.inputStream() }.use { BitmapFactory.decodeStream(it) }!!
+                assertEquals(600, filtered.height)
+                assertEquals(android.graphics.Color.YELLOW, filtered.getPixel(20, 200))
+                filtered.recycle()
+                page.recycle()
+            }
+            val blank = Bitmap.createBitmap(
+                480,
+                600,
+                Bitmap.Config.ARGB_8888,
+            ).apply { eraseColor(android.graphics.Color.WHITE) }
+            val bytes = encode(blank)
+            blank.recycle()
+            assertArrayEquals(bytes, ReaderImageRules.open { bytes.inputStream() }.use { it.readBytes() })
+        } finally {
+            spam.recycle()
+            ReaderImageRules.remove(hash)
+        }
+    }
 }

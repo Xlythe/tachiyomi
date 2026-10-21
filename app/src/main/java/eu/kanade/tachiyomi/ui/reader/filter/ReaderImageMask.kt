@@ -9,6 +9,8 @@ import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.security.MessageDigest
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /** Decode strips so hashing a long banner does not require a full-page bitmap. */
 internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
@@ -73,17 +75,52 @@ internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
         return bestOffset
     }
 
-    fun render(top: Int, bottom: Int): ByteArray {
-        require(top >= 0 && top < bottom && bottom <= height)
-        val retained = height - (bottom - top)
+    fun signature(top: Int = 0, bottom: Int = height): ReaderImageSignature {
+        val rows = ((bottom - top) * 48f / width).roundToInt().coerceAtLeast(1)
+        require(rows <= 4096) { "Image too long for similarity matching" }
+        val small = Bitmap.createBitmap(48, rows, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = Canvas(small)
+            canvas.scale(48f / width, rows.toFloat() / (bottom - top))
+            strips(top, bottom) { bitmap, row -> canvas.drawBitmap(bitmap, 0f, (row - top).toFloat(), null) }
+            val pixels = IntArray(48 * rows)
+            small.getPixels(pixels, 0, 48, 0, 0, 48, rows)
+            return ReaderImageSignature(pixels)
+        } finally { small.recycle() }
+    }
+
+    fun contrastEdges(): List<Float> {
+        if (height > 100_000) return emptyList()
+        val columns = minOf(width, 64)
+        val pixels = IntArray(columns * height)
+        strips(0, height) { bitmap, row ->
+            for (y in 0 until bitmap.height) for (x in 0 until columns) {
+                pixels[(row + y) * columns + x] = bitmap.getPixel(x * width / columns, y)
+            }
+        }
+        return ReaderImageSignature.contrastEdges(pixels, columns).map { it.toFloat() / height }
+    }
+
+    fun render(top: Int, bottom: Int): ByteArray = render(listOf(top until bottom))
+
+    fun render(removals: List<IntRange>): ByteArray {
+        require(width.toLong() * height <= 40_000_000) { "Image too large to filter safely" }
+        val bands = ReaderImageSignature.merge(removals)
+        require(bands.all { it.first >= 0 && it.first <= it.last && it.last < height })
+        val retained = height - bands.sumOf { it.last - it.first + 1 }
         val result = Bitmap.createBitmap(width, retained.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         try {
             val canvas = Canvas(result)
-            strips(0, top) { bitmap, row -> canvas.drawBitmap(bitmap, 0f, row.toFloat(), null) }
-            strips(
-                bottom,
-                height,
-            ) { bitmap, row -> canvas.drawBitmap(bitmap, 0f, (row - bottom + top).toFloat(), null) }
+            var start = 0
+            var removed = 0
+            for (band in bands + listOf(height until height)) {
+                strips(
+                    start,
+                    band.first,
+                ) { bitmap, row -> canvas.drawBitmap(bitmap, 0f, (row - removed).toFloat(), null) }
+                removed += band.last - band.first + 1
+                start = band.last + 1
+            }
             return ByteArrayOutputStream().use {
                 check(result.compress(Bitmap.CompressFormat.PNG, 100, it))
                 it.toByteArray()
@@ -91,6 +128,43 @@ internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
         } finally {
             result.recycle()
         }
+    }
+
+    /** Optional local interpolation, not recovery of the unknown pixels under an overlay. */
+    fun renderWatermark(area: Rect): ByteArray {
+        require(width.toLong() * height <= 40_000_000) { "Image too large to filter safely" }
+        require(area.left > 0 && area.top >= 0 && area.right < width && area.bottom <= height)
+        require(area.width() > 1 && area.height() > 1 && area.width().toLong() * area.height() <= 1_000_000)
+        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = Canvas(result)
+            strips(0, height) { bitmap, row -> canvas.drawBitmap(bitmap, 0f, row.toFloat(), null) }
+            val cx = (area.left + area.right - 1) / 2f
+            val cy = (area.top + area.bottom - 1) / 2f
+            val rx = area.width() / 2f
+            val ry = area.height() / 2f
+            for (y in area.top until area.bottom) {
+                val dy = (y - cy) / ry
+                val span = rx * sqrt((1f - dy * dy).coerceAtLeast(0f))
+                val left = (cx - span).roundToInt().coerceAtLeast(1)
+                val right = (cx + span).roundToInt().coerceAtMost(width - 2)
+                val a = result.getPixel(left - 1, y)
+                val b = result.getPixel(right + 1, y)
+                for (x in left..right) {
+                    val t = (x - left + 1f) / (right - left + 2f)
+                    var colour = 0
+                    for (shift in 0..24 step 8) {
+                        val v = ((a ushr shift) and 255) * (1 - t) + ((b ushr shift) and 255) * t
+                        colour = colour or (v.roundToInt() shl shift)
+                    }
+                    result.setPixel(x, y, colour)
+                }
+            }
+            return ByteArrayOutputStream().use {
+                check(result.compress(Bitmap.CompressFormat.PNG, 100, it))
+                it.toByteArray()
+            }
+        } finally { result.recycle() }
     }
 
     override fun close() {
