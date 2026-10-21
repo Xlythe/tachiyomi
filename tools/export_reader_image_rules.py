@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import subprocess
+import zipfile
 from pathlib import Path
 
 
@@ -15,7 +16,10 @@ def main():
     parser.add_argument("--package", default="eu.kanade.tachiyomi")
     parser.add_argument("--user", type=int, default=0)
     parser.add_argument("--metadata-only", action="store_true")
+    parser.add_argument("--archive", type=Path, help="Also create a portable ZIP for the in-app importer")
     args = parser.parse_args()
+    if args.archive and args.metadata_only:
+        parser.error("--archive requires original samples; omit --metadata-only")
     adb = ["adb"] + (["-s", args.serial] if args.serial else [])
     base = f"content://{args.package}.reader_image_rules"
 
@@ -43,6 +47,13 @@ def main():
                 raise ValueError(f"Original image hash mismatch: {digest}")
             (args.output / f"{digest}.original").write_bytes(raw)
     (args.output / "rules.json").write_text(json.dumps(records, indent=2), encoding="utf-8")
+    if args.archive:
+        with zipfile.ZipFile(args.archive, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("format.json", json.dumps({"format": "tachiyomi-reader-image-rules", "version": 1}))
+            archive.write(args.output / "rules.json", "rules.json")
+            for record in records:
+                name = f"{record['sha256']}.original"
+                archive.write(args.output / name, name)
     print(f"Exported {len(records)} rules to {args.output}")
 
 
