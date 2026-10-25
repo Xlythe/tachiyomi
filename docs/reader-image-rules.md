@@ -158,6 +158,15 @@ index and never clears existing data. Without `readerCorpus`, this test is skipp
 Keep the export outside source control; neither the images nor the reading
 metadata belong in the app/test APKs.
 
+The additional `combinedCorpusReaderLoadsStayBoundedAndPreserveRetainedRegions`
+test requires `readerCorpusCombined=true`. It imports the complete corpus into an
+empty disposable test installation, evaluates all 78 retained regions in the
+October 2026 audit corpus, records cold/warm read times and sampled memory growth,
+and removes only the rules it imported. Its emulator regression limits are a
+5-second cold read, 750 ms warm p95, 2-second warm maximum, three-minute read audit,
+64 MiB managed-heap growth after GC and 128 MiB sampled PSS growth. These limits
+are test guardrails; measurements on a physical reader device may differ.
+
 On DESKTOP-WILL, the prior build's missing FlexibleAdapter artifact is available
 from the local Maven repository under
 `../scratch/FlexibleAdapter-build/maven-pinned`. Runtime source is upstream
