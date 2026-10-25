@@ -457,6 +457,9 @@ class ReaderActivity : BaseActivity() {
                         page = dialog.page,
                         metadata = viewModel.imageRuleMetadata(dialog.page),
                         onDismiss = onDismissRequest,
+                        onRuleChanged = { hidden ->
+                            viewModel.state.value.viewer?.onImageRuleApplied(dialog.page, hidden)
+                        },
                         onApplied = { hash ->
                             com.google.android.material.snackbar.Snackbar.make(
                                 binding.root,
@@ -465,6 +468,9 @@ class ReaderActivity : BaseActivity() {
                             ).setAction(stringResource(MR.strings.reader_restore_image)) {
                                 lifecycleScope.launchIO {
                                     eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules.remove(hash)
+                                    withUIContext {
+                                        viewModel.state.value.viewer?.onImageRuleApplied(dialog.page, false)
+                                    }
                                 }
                             }.show()
                         },

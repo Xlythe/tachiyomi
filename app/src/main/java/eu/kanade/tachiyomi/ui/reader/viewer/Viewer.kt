@@ -31,6 +31,9 @@ interface Viewer {
      */
     fun moveToPage(page: ReaderPage)
 
+    /** Apply an explicit editor choice to its visible holder before background matching finishes. */
+    fun onImageRuleApplied(page: ReaderPage, hidden: Boolean) {}
+
     /**
      * Called from the containing activity when a key [event] is received. It should return true
      * if the event was handled, false otherwise.

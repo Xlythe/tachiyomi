@@ -33,6 +33,12 @@ import kotlin.math.min
  */
 class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = true) : Viewer {
 
+    override fun onImageRuleApplied(page: ReaderPage, hidden: Boolean) {
+        page.applyRuleVisibility(hidden)
+        val position = adapter.items.indexOfFirst { it === page }
+        (recycler.findViewHolderForAdapterPosition(position) as? WebtoonPageHolder)?.onImageRuleApplied()
+    }
+
     val downloadManager: DownloadManager by injectLazy()
 
     private val scope = MainScope()

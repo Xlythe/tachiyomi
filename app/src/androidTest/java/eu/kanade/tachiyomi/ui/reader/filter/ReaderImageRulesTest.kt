@@ -281,4 +281,34 @@ class ReaderImageRulesTest {
             ReaderImageRules.remove(hash)
         }
     }
+
+    @Test
+    fun explicitHideVisibilityDoesNotWaitForOtherPagesHoldingTheMatcherLock() {
+        val page = ReaderPage(0, stream = { original.inputStream() })
+        page.stream!!().close()
+        ReaderImageRules.save(original, 0, 10, JSONObject())
+        val acquired = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val worker = Thread {
+            synchronized(ReaderImageRules) {
+                acquired.countDown()
+                release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        }
+        worker.start()
+        try {
+            assertTrue(acquired.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                val start = android.os.SystemClock.elapsedRealtime()
+                page.applyRuleVisibility(true)
+                assertTrue(page.isHidden)
+                page.applyRuleVisibility(false)
+                assertFalse(page.isHidden)
+                assertTrue(android.os.SystemClock.elapsedRealtime() - start < 250)
+            }
+        } finally {
+            release.countDown()
+            worker.join(2000)
+        }
+    }
 }

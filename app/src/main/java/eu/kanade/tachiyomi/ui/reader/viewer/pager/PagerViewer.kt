@@ -69,6 +69,11 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         }
     }
 
+    override fun onImageRuleApplied(page: ReaderPage, hidden: Boolean) {
+        page.applyRuleVisibility(hidden)
+        getPageHolder(page)?.onImageRuleApplied()
+    }
+
     /**
      * Viewer chapters to set when the pager enters idle mode. Otherwise, if the view was settling
      * or dragging, there'd be a noticeable and annoying jump.

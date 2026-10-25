@@ -26,7 +26,22 @@ open class ReaderPage(
                 )
             }
         }
-        set(value) { originalStream = value }
+        set(value) {
+            originalStream = value
+            displayDimensions = null
+            hidden = false
+            matchedRevision = -1L
+        }
+
+    /** Last displayed aspect ratio, not an image copy. Headers fill this before slow filtering. */
+    @Volatile
+    internal var displayDimensions: Pair<Int, Int>? = null
+
+    /** The editor already knows this exact page's committed choice; no matcher lock is needed. */
+    internal fun applyRuleVisibility(isHidden: Boolean) {
+        hidden = isHidden
+        matchedRevision = ReaderImageRules.revision.value
+    }
 
     @Volatile
     private var matchedRevision = -1L
