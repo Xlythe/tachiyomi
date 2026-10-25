@@ -30,6 +30,14 @@ Saved originals and
 pixel coordinates remain the evidence for each rule.
 Animated images become a static first-frame image when cropped.
 
+Whole-page hides also derive exact decoded-pixel fingerprints from their preserved
+originals, including older saved rules, without changing the rule index. An entire
+identical sample can match a page of the same dimensions or either edge of a
+taller page of the same width. A row hash is only a prefilter: the complete proposed
+removal must match pixel for pixel. This covers short banners and sparse cards
+without relaxing approximate matching. It does not search page interiors, accept
+a truncated exact sample, or infer that other covers/credit pages should be hidden.
+
 The exact checks are followed by conservative colour-signature matching. This
 normalizes width to 48 samples while retaining aspect ratio and checks every row
 of the proposed removal. Small colour changes and proportionate resizing can
@@ -135,6 +143,20 @@ Android instrumentation additionally covers exact pixels, overlapping crops,
 repeated stream reads/restoration, corpus round trips, malformed archives,
 watermark boundaries, resizing, re-encoding, and split-page matching. Installing
 the app/test APKs on any device requires confirmation.
+
+For a private corpus audit, use an isolated disposable emulator and the
+`ReaderImageCorpusTest` instrumentation class with the `readerCorpus` argument.
+Copy the exported ZIP to that test app's external files directory and supply its
+absolute device path. The test checks the format, entry names, limits and original
+checksums before evaluating one saved rule at a time. It tests whole-page choices
+with changed encoded bytes but identical decoded pixels, and tests the regions
+the user retained on partially cropped pages as negatives. These retained regions
+are evidence about that particular rule, not universal labels for all artwork.
+It writes `reader-corpus-report.json` to the target app's external files directory
+and removes each temporary rule in a `finally` block. It requires an empty rule
+index and never clears existing data. Without `readerCorpus`, this test is skipped.
+Keep the export outside source control; neither the images nor the reading
+metadata belong in the app/test APKs.
 
 On DESKTOP-WILL, the prior build's missing FlexibleAdapter artifact is available
 from the local Maven repository under

@@ -147,6 +147,70 @@ class ReaderImageRulesTest {
     }.toByteArray()
 
     @Test
+    fun shortWholeBannerMatchesExactPixelsAtEitherEdgeWithoutRemovingStory() {
+        val banner = Bitmap.createBitmap(480, 60, Bitmap.Config.ARGB_8888)
+        for (y in 0 until banner.height) for (x in 0 until banner.width) {
+            banner.setPixel(x, y, if ((x / 12 + y / 6) % 2 == 0) 0xff702090.toInt() else -1)
+        }
+        val raw = encode(banner)
+        val hash = ReaderImageRules.hash(raw)
+        try {
+            ReaderImageRules.save(raw, 0, banner.height, JSONObject())
+            // Different encoded bytes, identical decoded pixels (as with changed image metadata).
+            var hidden = false
+            ReaderImageRules.open(onMatch = { hidden = it }) { (raw + byteArrayOf(0)).inputStream() }.close()
+            assertTrue(hidden)
+            for (atTop in listOf(true, false)) {
+                val page = Bitmap.createBitmap(480, 300, Bitmap.Config.ARGB_8888)
+                page.eraseColor(android.graphics.Color.YELLOW)
+                android.graphics.Canvas(page).drawBitmap(banner, 0f, if (atTop) 0f else 240f, null)
+                val bytes = encode(page)
+                repeat(2) {
+                    val filtered = ReaderImageRules.open { bytes.inputStream() }.use {
+                        BitmapFactory.decodeStream(
+                            it,
+                        )
+                    }!!
+                    assertEquals(240, filtered.height)
+                    assertEquals(android.graphics.Color.YELLOW, filtered.getPixel(20, 120))
+                    filtered.recycle()
+                }
+                page.recycle()
+            }
+            banner.setPixel(239, 30, android.graphics.Color.GREEN)
+            val changed = encode(banner)
+            assertArrayEquals(changed, ReaderImageRules.open { changed.inputStream() }.use { it.readBytes() })
+        } finally {
+            banner.recycle()
+            ReaderImageRules.remove(hash)
+        }
+    }
+
+    @Test
+    fun sparseWholeCardMatchesExactPixelsButNotBlankOrSimilarLettering() {
+        val card = Bitmap.createBitmap(480, 600, Bitmap.Config.ARGB_8888)
+        card.eraseColor(android.graphics.Color.WHITE)
+        for (y in 270 until 290) for (x in 100 until 380 step 20) card.setPixel(x, y, 0xff202020.toInt())
+        val raw = encode(card)
+        val hash = ReaderImageRules.hash(raw)
+        try {
+            ReaderImageRules.save(raw, 0, card.height, JSONObject())
+            var hidden = false
+            ReaderImageRules.open(onMatch = { hidden = it }) { (raw + byteArrayOf(0)).inputStream() }.close()
+            assertTrue(hidden)
+            card.setPixel(240, 280, android.graphics.Color.RED)
+            val changed = encode(card)
+            assertArrayEquals(changed, ReaderImageRules.open { changed.inputStream() }.use { it.readBytes() })
+            card.eraseColor(android.graphics.Color.WHITE)
+            val blank = encode(card)
+            assertArrayEquals(blank, ReaderImageRules.open { blank.inputStream() }.use { it.readBytes() })
+        } finally {
+            card.recycle()
+            ReaderImageRules.remove(hash)
+        }
+    }
+
+    @Test
     fun repeatedDownloadedStreamsCloseAndHiddenStateTracksRestore() {
         ReaderImageRules.save(original, 0, 10, JSONObject())
         var closes = 0

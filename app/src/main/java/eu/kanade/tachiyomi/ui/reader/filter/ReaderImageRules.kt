@@ -30,6 +30,8 @@ object ReaderImageRules {
     private val index get() = AtomicFile(File(directory, "rules.json"))
     private var loaded: MutableMap<String, JSONObject>? = null
     private val signatures = LinkedHashMap<String, ReaderImageSignature>(128, 0.75f, true)
+    private data class WholeFingerprint(val probe: Int, val probeHash: String, val pixelsHash: String)
+    private val wholeFingerprints = LinkedHashMap<String, WholeFingerprint>(128, 0.75f, true)
 
     @Synchronized
     private fun rules(): MutableMap<String, JSONObject> {
@@ -188,6 +190,7 @@ object ReaderImageRules {
             if (imported > 0) {
                 persist(updated)
                 signatures.clear()
+                wholeFingerprints.clear()
                 revision.value++
             }
         } catch (error: Throwable) {
@@ -288,6 +291,7 @@ object ReaderImageRules {
         if (replacingHash != null && replacingHash != hash) original(replacingHash).delete()
         revision.value++
         signatures.clear()
+        wholeFingerprints.clear()
     }
 
     @Synchronized
@@ -298,6 +302,7 @@ object ReaderImageRules {
         File(directory, previous.getString("replacementFile")).delete()
         revision.value++
         signatures.clear()
+        wholeFingerprints.clear()
         return true
     }
 
@@ -346,27 +351,61 @@ object ReaderImageRules {
     private fun matchingBands(image: ReaderImageMask, exact: JSONObject? = null): List<JSONObject> {
         val matches = mutableListOf<JSONObject>()
         if (exact != null) matches += JSONObject(exact.toString())
-        val partialRules = rules().values.filter { it.has("maskPixelSha256") }
+        val exactRules = rules().values.filter {
+            !it.has("watermark") && (it.has("maskPixelSha256") || it.optBoolean("hide"))
+        }
         val hashes = mutableMapOf<Pair<Int, Int>, String>()
-        for (candidate in partialRules) {
+        for (candidate in exactRules) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
             if (candidate.getInt("width") != image.width) continue
             val bandHeight = candidate.getInt("removeBottom") - candidate.getInt("removeTop")
-            val start = when (candidate.getString("maskAnchor")) {
-                "top" -> 0
-                "bottom" -> image.height - bandHeight
-                else -> candidate.getInt("removeTop")
+            if (bandHeight > image.height) continue
+            val whole = candidate.optBoolean("hide")
+            val fingerprint = if (whole) {
+                runCatching {
+                    wholeFingerprints.getOrPut(candidate.getString("sha256")) {
+                        ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use { sample ->
+                            val probe = sample.probeOffset(0, sample.height)
+                            WholeFingerprint(
+                                probe,
+                                sample.hashBand(probe, probe + 1),
+                                sample.hashBand(0, sample.height),
+                            )
+                        }
+                    }
+                }.getOrNull() ?: continue
+            } else {
+                WholeFingerprint(
+                    candidate.getInt("maskProbeOffset"),
+                    candidate.getString("maskProbeSha256"),
+                    candidate.getString("maskPixelSha256"),
+                )
             }
-            val end = start + bandHeight
-            if (start < 0 || end > image.height) continue
-            val probe = start + candidate.getInt("maskProbeOffset")
-            val probeHash = hashes.getOrPut(probe to probe + 1) { image.hashBand(probe, probe + 1) }
-            if (probeHash != candidate.getString("maskProbeSha256")) continue
-            val fingerprint = hashes.getOrPut(start to end) { image.hashBand(start, end) }
-            if (fingerprint != candidate.getString("maskPixelSha256")) continue
-            matches += JSONObject(candidate.toString()).apply {
-                put("removeTop", start)
-                put("removeBottom", end)
+            while (wholeFingerprints.size > 256) wholeFingerprints.remove(wholeFingerprints.keys.first())
+            val starts = if (whole) {
+                // An entire saved banner may recur at either edge. Never search story interiors.
+                listOf(0, image.height - bandHeight).distinct()
+            } else {
+                listOf(
+                    when (candidate.getString("maskAnchor")) {
+                        "top" -> 0
+                        "bottom" -> image.height - bandHeight
+                        else -> candidate.getInt("removeTop")
+                    },
+                )
+            }
+            for (start in starts) {
+                val end = start + bandHeight
+                if (start < 0 || end > image.height) continue
+                val probe = start + fingerprint.probe
+                val probeHash = hashes.getOrPut(probe to probe + 1) { image.hashBand(probe, probe + 1) }
+                if (probeHash != fingerprint.probeHash) continue
+                val pixelsHash = hashes.getOrPut(start to end) { image.hashBand(start, end) }
+                if (pixelsHash != fingerprint.pixelsHash) continue
+                matches += JSONObject(candidate.toString()).apply {
+                    put("removeTop", start)
+                    put("removeBottom", end)
+                }
             }
         }
         // Old rules participate without migration: derive signatures from the preserved originals.
