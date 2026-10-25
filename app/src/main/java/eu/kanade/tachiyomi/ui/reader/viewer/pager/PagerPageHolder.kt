@@ -83,6 +83,17 @@ class PagerPageHolder(
         if (loadJob == null) loadJob = scope.launch { loadPageAndProcessStatus() }
     }
 
+    fun onImageRuleApplied() {
+        loadJob?.cancel()
+        if (page.isHidden) {
+            recycle()
+            progressIndicator.hide()
+            removeErrorLayout()
+            viewer.skipHiddenPage(page)
+        }
+        loadJob = scope.launch { loadPageAndProcessStatus() }
+    }
+
     /**
      * Loads the page and processes changes to the page's status.
      *
@@ -142,6 +153,13 @@ class PagerPageHolder(
      * Called when the page is ready.
      */
     private suspend fun setImage() {
+        if (page.isHidden) {
+            recycle()
+            progressIndicator.hide()
+            removeErrorLayout()
+            viewer.skipHiddenPage(page)
+            return
+        }
         progressIndicator.setProgress(0)
 
         val streamFn = page.stream ?: return setError()

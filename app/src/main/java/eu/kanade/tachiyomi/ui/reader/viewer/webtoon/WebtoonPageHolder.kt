@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
 import android.content.res.Resources
+import android.graphics.BitmapFactory
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -66,7 +67,9 @@ class WebtoonPageHolder(
      * Getter to retrieve the height of the recycler view.
      */
     private val parentHeight
-        get() = viewer.recycler.height
+        get() = (viewer.recycler.height.takeIf { it > 0 } ?: frame.resources.displayMetrics.heightPixels).coerceAtLeast(
+            1,
+        )
 
     /**
      * Page of a chapter.
@@ -74,6 +77,7 @@ class WebtoonPageHolder(
     private var page: ReaderPage? = null
 
     private val scope = MainScope()
+    private val geometry = WebtoonPageGeometry(frame, viewer.recycler)
 
     /**
      * Job for loading the page.
@@ -82,9 +86,8 @@ class WebtoonPageHolder(
 
     init {
         refreshLayoutParams()
+        geometry.bind(null)
 
-        frame.onImageLoaded = { onImageDecoded() }
-        frame.onImageLoadError = { setError() }
         frame.onScaleChanged = { viewer.activity.hideMenu() }
     }
 
@@ -92,10 +95,27 @@ class WebtoonPageHolder(
      * Binds the given [page] with this view holder, subscribing to its state.
      */
     fun bind(page: ReaderPage) {
-        this.page = page
         loadJob?.cancel()
-        loadJob = scope.launch { loadPageAndProcessStatus() }
+        frame.recycle()
+        this.page = page
         refreshLayoutParams()
+        val token = geometry.bind(page.displayDimensions)
+        if (page.isHidden) showHidden(token)
+        loadJob = scope.launch { loadPageAndProcessStatus() }
+    }
+
+    fun onImageRuleApplied() {
+        loadJob?.cancel()
+        if (page?.isHidden == true) showHidden(geometry.begin()) else geometry.pending()
+        loadJob = scope.launch { loadPageAndProcessStatus() }
+    }
+
+    private fun showHidden(token: Long) {
+        if (!geometry.isCurrent(token)) return
+        frame.recycle()
+        progressContainer.isVisible = false
+        removeErrorLayout()
+        geometry.hide(token)
     }
 
     private fun refreshLayoutParams() {
@@ -109,6 +129,8 @@ class WebtoonPageHolder(
     override fun recycle() {
         loadJob?.cancel()
         loadJob = null
+        geometry.invalidate()
+        page = null
 
         removeErrorLayout()
         frame.recycle()
@@ -178,15 +200,38 @@ class WebtoonPageHolder(
      */
     private suspend fun setImage() {
         progressIndicator.setProgress(0)
+        val page = page ?: return
+        val token = geometry.begin()
+        if (page.isHidden) {
+            showHidden(token)
+            return
+        }
+        progressContainer.isVisible = true
+        progressIndicator.show()
 
-        val streamFn = page?.stream ?: return setError()
+        val streamFn = page.stream ?: return setError()
 
         try {
-            refreshLayoutParams()
+            if (page.displayDimensions == null) {
+                val bounds = withIOContext {
+                    runCatching {
+                        page.originalStream?.invoke()?.use { raw ->
+                            BitmapFactory.Options().apply {
+                                inJustDecodeBounds = true
+                                BitmapFactory.decodeStream(raw, null, this)
+                            }
+                        }
+                    }.getOrNull()
+                }
+                if (bounds != null && bounds.outWidth > 0 && bounds.outHeight > 0 && geometry.isCurrent(token)) {
+                    page.displayDimensions = bounds.outWidth to bounds.outHeight
+                    geometry.metadata(token, bounds.outWidth, bounds.outHeight)
+                }
+            }
             val (openStream, isAnimated) = withIOContext {
                 // Buffer the processed result so cancellation cannot leave a ZIP/file stream open.
                 streamFn().buffered(16).use { stream ->
-                    if (page?.isHidden == true) return@withIOContext Pair(byteArrayOf().inputStream(), false)
+                    if (page.isHidden) return@withIOContext Pair(byteArrayOf().inputStream(), false)
                     process(stream).use { processed ->
                         val buffered = processed.readBytes().inputStream()
                         val animated = ImageUtil.isAnimatedAndSupported(buffered)
@@ -195,15 +240,27 @@ class WebtoonPageHolder(
                     }
                 }
             }
-            if (page?.isHidden == true) {
+            if (!geometry.isCurrent(token)) {
                 openStream.close()
-                frame.recycle()
-                progressContainer.isVisible = false
-                removeErrorLayout()
-                frame.updateLayoutParams { height = 1 }
+                return
+            }
+            if (page.isHidden) {
+                openStream.close()
+                showHidden(token)
                 return
             }
             withUIContext {
+                if (!geometry.isCurrent(token)) return@withUIContext
+                frame.onImageLoaded = {
+                    if (geometry.isCurrent(token)) {
+                        frame.imageDimensions()?.let { (width, height) ->
+                            page.displayDimensions = width to height
+                            geometry.loaded(token, width, height)
+                        }
+                        onImageDecoded()
+                    }
+                }
+                frame.onImageLoadError = { if (geometry.isCurrent(token)) setError() }
                 frame.setImage(
                     openStream,
                     isAnimated,
@@ -223,7 +280,7 @@ class WebtoonPageHolder(
             if (e is CancellationException) throw e
             logcat(LogPriority.ERROR, e)
             withUIContext {
-                setError()
+                if (geometry.isCurrent(token)) setError()
             }
         }
     }
@@ -276,7 +333,7 @@ class WebtoonPageHolder(
      */
     private fun createProgressIndicator(): ReaderProgressIndicator {
         progressContainer = FrameLayout(context)
-        frame.addView(progressContainer, MATCH_PARENT, parentHeight)
+        frame.addView(progressContainer, MATCH_PARENT, MATCH_PARENT)
 
         val progress = ReaderProgressIndicator(context).apply {
             updateLayoutParams<FrameLayout.LayoutParams> {

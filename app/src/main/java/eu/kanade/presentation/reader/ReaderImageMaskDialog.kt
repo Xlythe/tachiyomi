@@ -65,7 +65,13 @@ import kotlin.math.roundToInt
 
 /** The shaded, full-width band is removed; content above and below it is joined. */
 @Composable
-fun ReaderImageMaskDialog(page: ReaderPage, metadata: JSONObject, onDismiss: () -> Unit, onApplied: (String) -> Unit) {
+fun ReaderImageMaskDialog(
+    page: ReaderPage,
+    metadata: JSONObject,
+    onDismiss: () -> Unit,
+    onApplied: (String) -> Unit,
+    onRuleChanged: (Boolean) -> Unit = {},
+) {
     var bytes by remember(page) { mutableStateOf<ByteArray?>(null) }
     var preview by remember(page) { mutableStateOf<ImageBitmap?>(null) }
     var height by remember(page) { mutableStateOf(1) }
@@ -185,6 +191,10 @@ fun ReaderImageMaskDialog(page: ReaderPage, metadata: JSONObject, onDismiss: () 
                         )
                     }
                 }
+                onRuleChanged(
+                    !restore && !watermarkMode && (top * height).roundToInt() == 0 &&
+                        (bottom * height).roundToInt() == height,
+                )
                 onDismiss()
                 if (!restore) onApplied(ReaderImageRules.hash(raw))
             } catch (e: Exception) {
