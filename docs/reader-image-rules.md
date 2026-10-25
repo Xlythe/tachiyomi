@@ -30,6 +30,20 @@ Saved originals and
 pixel coordinates remain the evidence for each rule.
 Animated images become a static first-frame image when cropped.
 
+Derived signatures and whole-page fingerprints are prepared by a background
+worker. Until preparation finishes, exact saved-image hides and explicit crops
+still apply; unfamiliar images remain visible rather than using incomplete
+matching evidence. The editor shows preparation and limited-availability status.
+Completion refreshes current reader pages without changing saved visibility hints.
+
+The disposable derived cache is separate from originals and rules. Keys include
+source checksum, crop coordinates, algorithm version and Android decoder build.
+Writes are atomic and corrupt or incompatible entries are regenerated. Memory is
+limited to 16 MiB and disk to 128 MiB; cache eviction can temporarily reduce learned
+matching coverage, never remove a user's rule or original. Lossy WebP evidence
+retains the original 64-row decoding semantics; larger decoded-region reuse is
+restricted to PNG. No cache or preparation work transmits reading data.
+
 Whole-page hides also derive exact decoded-pixel fingerprints from their preserved
 originals, including older saved rules, without changing the rule index. An entire
 identical sample can match a page of the same dimensions or either edge of a

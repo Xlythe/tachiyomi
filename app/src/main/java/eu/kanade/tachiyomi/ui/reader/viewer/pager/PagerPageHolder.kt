@@ -108,7 +108,9 @@ class PagerPageHolder(
             launchIO {
                 loader.loadPage(page)
             }
-            combine(page.statusFlow, ReaderImageRules.revision) { state, _ -> state }.collectLatest { state ->
+            combine(page.statusFlow, ReaderImageRules.revision, ReaderImageRules.preparedRevision) { state, _, _ ->
+                state
+            }.collectLatest { state ->
                 when (state) {
                     Page.State.QUEUE -> setQueued()
                     Page.State.LOAD_PAGE -> setLoading()

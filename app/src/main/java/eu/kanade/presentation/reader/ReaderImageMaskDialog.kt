@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,6 +92,8 @@ fun ReaderImageMaskDialog(
     var guessedPreview by remember(page) { mutableStateOf<ImageBitmap?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val preparing by ReaderImageRules.preparing.collectAsState()
+    val preparationFailures by ReaderImageRules.preparationFailures.collectAsState()
 
     fun transfer(importing: Boolean, uri: android.net.Uri) {
         busy = true
@@ -222,6 +225,16 @@ fun ReaderImageMaskDialog(
                 }
                 Text(stringResource(MR.strings.reader_hide_image), style = MaterialTheme.typography.titleLarge)
                 Text(stringResource(MR.strings.reader_mask_instructions))
+                Text(
+                    if (preparing) {
+                        "Preparing local matching…"
+                    } else if (preparationFailures > 0) {
+                        "Local matching limited"
+                    } else {
+                        "Local matching ready"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                )
                 Row {
                     TextButton(onClick = {
                         watermarkMode = !watermarkMode

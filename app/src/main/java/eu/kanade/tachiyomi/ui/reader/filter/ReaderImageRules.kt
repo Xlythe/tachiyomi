@@ -4,7 +4,13 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.util.AtomicFile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -20,18 +26,127 @@ import kotlin.math.roundToInt
 /** User-authored rules are independent of sources and never overwrite chapter/download files. */
 object ReaderImageRules {
     val revision = MutableStateFlow(0L)
+    val preparedRevision = MutableStateFlow(0L)
+    val preparing = MutableStateFlow(false)
+    val preparationFailures = MutableStateFlow(0)
     private lateinit var directory: File
+    private lateinit var fingerprints: ReaderRuleFingerprintCache
+    private val preparationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var preparationJob: Job? = null
+    private var preparationRequested = false
+    private val prepared = LinkedHashMap<String, ReaderRuleFingerprintCache.Entry>(128, 0.75f, true)
+    private val unavailable = mutableSetOf<String>()
+    private val importLock = Any()
+    private var importTouched: MutableSet<String>? = null
 
     // Content providers can serve ADB calls before Application.onCreate installs Injekt.
     @Synchronized
     fun initialize(context: Context) {
-        directory = File(context.filesDir, "reader-image-rules").apply { mkdirs() }
+        val target = File(context.filesDir, "reader-image-rules")
+        if (::directory.isInitialized && directory == target) return
+        directory = target.apply { mkdirs() }
+        fingerprints = ReaderRuleFingerprintCache(File(context.filesDir, "reader-image-fingerprints-v1"))
+        schedulePreparation()
     }
     private val index get() = AtomicFile(File(directory, "rules.json"))
     private var loaded: MutableMap<String, JSONObject>? = null
-    private val signatures = LinkedHashMap<String, ReaderImageSignature>(128, 0.75f, true)
     private data class WholeFingerprint(val probe: Int, val probeHash: String, val pixelsHash: String)
-    private val wholeFingerprints = LinkedHashMap<String, WholeFingerprint>(128, 0.75f, true)
+
+    /** Call under the rules monitor; image decoding is always performed by the background job. */
+    private fun schedulePreparation() {
+        preparationRequested = true
+        if (preparationJob?.isActive == true) return
+        preparing.value = true
+        val job = preparationScope.launch(start = CoroutineStart.LAZY) {
+            var changed = false
+            var failures = 0
+            try {
+                while (true) {
+                    val snapshot = synchronized(this@ReaderImageRules) {
+                        preparationRequested = false
+                        unavailable.clear()
+                        rules().values.filter { !it.has("watermark") }.map { JSONObject(it.toString()) }
+                    }
+                    failures = 0
+                    for (rule in snapshot) {
+                        val entry = runCatching {
+                            fingerprints.read(rule) ?: fingerprints.prepare(
+                                rule,
+                                original(rule.getString("sha256")).readBytes(),
+                            )
+                        }.getOrNull()
+                        synchronized(this@ReaderImageRules) {
+                            val current = rules()[rule.getString("sha256")]
+                            if (
+                                current != null && !current.has("watermark") &&
+                                fingerprints.key(current) == fingerprints.key(rule)
+                            ) {
+                                if (entry != null) {
+                                    rememberPrepared(fingerprints.key(rule), entry)
+                                    changed = true
+                                } else {
+                                    unavailable += fingerprints.key(rule)
+                                    failures++
+                                }
+                            }
+                        }
+                    }
+                    val current = synchronized(this@ReaderImageRules) {
+                        rules().values.filter { !it.has("watermark") }.map { JSONObject(it.toString()) }
+                    }
+                    fingerprints.prune(current.map { fingerprints.key(it) }.toSet())
+                    synchronized(this@ReaderImageRules) {
+                        for (rule in current) {
+                            val key = fingerprints.key(rule)
+                            if (!fingerprints.contains(rule) && key !in prepared) unavailable += key
+                        }
+                        failures = maxOf(failures, unavailable.size)
+                    }
+                    val complete = synchronized(this@ReaderImageRules) {
+                        if (preparationRequested) {
+                            false
+                        } else {
+                            preparationFailures.value = failures
+                            preparing.value = false
+                            preparationJob = null
+                            // Availability is not a rule edit: preserve explicit visibility hints.
+                            if (changed) preparedRevision.value++
+                            true
+                        }
+                    }
+                    if (complete) break
+                }
+            } catch (_: Exception) {
+                synchronized(this@ReaderImageRules) {
+                    if (preparationJob === coroutineContext[Job]) {
+                        preparationFailures.value = maxOf(1, failures)
+                        preparing.value = false
+                        preparationJob = null
+                    }
+                }
+            }
+        }
+        preparationJob = job
+        job.start()
+    }
+
+    private fun rememberPrepared(key: String, entry: ReaderRuleFingerprintCache.Entry) {
+        prepared[key] = entry
+        while (prepared.values.sumOf { it.signature.pixels.size.toLong() * 4 } > 16L * 1024 * 1024) {
+            prepared.remove(prepared.keys.first())
+        }
+    }
+
+    private fun prepared(rule: JSONObject): ReaderRuleFingerprintCache.Entry? {
+        val key = fingerprints.key(rule)
+        prepared[key]?.let { return it }
+        fingerprints.read(rule)?.let {
+            rememberPrepared(key, it)
+            return it
+        }
+        if (key !in unavailable && !preparing.value) schedulePreparation()
+        return null // Preparation is conservative: unmatched content remains visible until ready.
+    }
 
     @Synchronized
     private fun rules(): MutableMap<String, JSONObject> {
@@ -50,8 +165,16 @@ object ReaderImageRules {
         }
     }
 
-    fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes)
-        .joinToString("") { "%02x".format(it) }
+    fun hash(bytes: ByteArray): String {
+        val digits = "0123456789abcdef"
+        return buildString(64) {
+            for (byte in MessageDigest.getInstance("SHA-256").digest(bytes)) {
+                val value = byte.toInt() and 255
+                append(digits[value ushr 4])
+                append(digits[value and 15])
+            }
+        }
+    }
 
     @Synchronized
     fun find(hash: String): JSONObject? = rules()[hash]?.let { JSONObject(it.toString()) }
@@ -74,18 +197,22 @@ object ReaderImageRules {
         }
     }
 
-    @Synchronized
-    fun importArchive(input: InputStream): Int {
+    fun importArchive(input: InputStream): Int = synchronized(importLock) {
         val staging = File(directory, "import-${UUID.randomUUID()}").apply { check(mkdir()) }
-        return try {
-            importStagedArchive(input, staging)
+        try {
+            val existing = synchronized(this) {
+                importTouched = mutableSetOf()
+                rules().keys.toSet()
+            }
+            importStagedArchive(input, staging, existing)
         } finally {
+            synchronized(this) { importTouched = null }
             staging.listFiles()?.forEach { it.delete() }
             staging.delete()
         }
     }
 
-    private fun importStagedArchive(input: InputStream, staging: File): Int {
+    private fun importStagedArchive(input: InputStream, staging: File, existing: Set<String>): Int {
         val entries = mutableMapOf<String, File>()
         var total = 0L
         ZipInputStream(input).use { zip ->
@@ -122,8 +249,9 @@ object ReaderImageRules {
         }
         val records = JSONArray(requireNotNull(entries["rules.json"]).readText())
         require(records.length() <= 1000) { "Too many rules" }
-        val updated = rules().toMutableMap()
+        val incoming = mutableMapOf<String, JSONObject>()
         val created = mutableListOf<File>()
+        val createdOriginals = mutableSetOf<String>()
         var imported = 0
         try {
             for (i in 0 until records.length()) {
@@ -134,7 +262,7 @@ object ReaderImageRules {
                 val raw = requireNotNull(entries["$digest.original"]) { "Missing original image" }.readBytes()
                 require(hash(raw) == digest) { "Original image checksum mismatch" }
                 // Import is additive: keep existing local choices on a duplicate image.
-                if (updated.containsKey(digest)) continue
+                if (digest in existing || digest in incoming) continue
                 val rule = JSONObject(record.toString())
                 val top = rule.getInt("removeTop")
                 val bottom = rule.getInt("removeBottom")
@@ -178,24 +306,40 @@ object ReaderImageRules {
                 rule.put("replacementFile", replacement.name)
                 created += replacement
                 replacement.writeBytes(rendered)
-                val original = original(digest)
-                if (!original.exists()) {
-                    created += original
+                synchronized(this) {
+                    if (!original(digest).exists()) createdOriginals += digest
+                    writeOriginal(digest, raw)
                 }
-                writeOriginal(digest, raw)
-                updated[digest] = rule
-                imported++
+                incoming[digest] = rule
             }
             // Publish once: an interrupted or invalid import never installs a partial index.
-            if (imported > 0) {
-                persist(updated)
-                signatures.clear()
-                wholeFingerprints.clear()
-                revision.value++
+            synchronized(this) {
+                val updated = rules().toMutableMap()
+                for ((digest, rule) in incoming) {
+                    if (digest !in updated && importTouched?.contains(digest) != true) {
+                        updated[digest] = rule
+                        imported++
+                    }
+                }
+                if (imported > 0) {
+                    persist(updated)
+                    prepared.clear()
+                    revision.value++
+                }
+                unavailable.clear()
+                schedulePreparation()
             }
         } catch (error: Throwable) {
             created.forEach { it.delete() }
+            synchronized(this) {
+                createdOriginals.filter { it !in rules() }.forEach { original(it).delete() }
+            }
             throw error
+        }
+        synchronized(this) {
+            val retained = rules().values.map { it.getString("replacementFile") }.toSet()
+            created.filter { it.name !in retained }.forEach { it.delete() }
+            createdOriginals.filter { it !in rules() }.forEach { original(it).delete() }
         }
         return imported
     }
@@ -289,20 +433,25 @@ object ReaderImageRules {
         }
         previous?.let { File(directory, it.getString("replacementFile")).delete() }
         if (replacingHash != null && replacingHash != hash) original(replacingHash).delete()
+        importTouched?.add(hash)
+        replacingHash?.let { importTouched?.add(it) }
         revision.value++
-        signatures.clear()
-        wholeFingerprints.clear()
+        prepared.clear()
+        unavailable.clear()
+        schedulePreparation()
     }
 
     @Synchronized
     fun remove(hash: String): Boolean {
+        importTouched?.add(hash)
         val previous = rules()[hash] ?: return false
         persist(rules() - hash)
         original(hash).delete()
         File(directory, previous.getString("replacementFile")).delete()
         revision.value++
-        signatures.clear()
-        wholeFingerprints.clear()
+        prepared.clear()
+        unavailable.clear()
+        schedulePreparation()
         return true
     }
 
@@ -362,18 +511,8 @@ object ReaderImageRules {
             if (bandHeight > image.height) continue
             val whole = candidate.optBoolean("hide")
             val fingerprint = if (whole) {
-                runCatching {
-                    wholeFingerprints.getOrPut(candidate.getString("sha256")) {
-                        ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use { sample ->
-                            val probe = sample.probeOffset(0, sample.height)
-                            WholeFingerprint(
-                                probe,
-                                sample.hashBand(probe, probe + 1),
-                                sample.hashBand(0, sample.height),
-                            )
-                        }
-                    }
-                }.getOrNull() ?: continue
+                val cached = prepared(candidate) ?: continue
+                WholeFingerprint(cached.probe, cached.probeHash, cached.pixelsHash)
             } else {
                 WholeFingerprint(
                     candidate.getInt("maskProbeOffset"),
@@ -381,7 +520,6 @@ object ReaderImageRules {
                     candidate.getString("maskPixelSha256"),
                 )
             }
-            while (wholeFingerprints.size > 256) wholeFingerprints.remove(wholeFingerprints.keys.first())
             val starts = if (whole) {
                 // An entire saved banner may recur at either edge. Never search story interiors.
                 listOf(0, image.height - bandHeight).distinct()
@@ -406,24 +544,15 @@ object ReaderImageRules {
                     put("removeTop", start)
                     put("removeBottom", end)
                 }
+                if (start == 0 && end == image.height) return matches
             }
         }
-        // Old rules participate without migration: derive signatures from the preserved originals.
+        // Original strip-derived evidence is prepared off the reader path and persisted locally.
         val target = runCatching { image.signature() }.getOrNull() ?: return matches
         val edges by lazy { image.contrastEdges().map { (it * image.height).roundToInt() } }
         for (candidate in rules().values.filter { !it.has("watermark") }) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
-            val sample = runCatching {
-                signatures.getOrPut(candidate.getString("sha256")) {
-                    ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
-                        it.signature(candidate.getInt("removeTop"), candidate.getInt("removeBottom"))
-                    }
-                }
-            }.getOrNull() ?: continue
-            // A corpus of small banners can stay warm without retaining decoded full-page bitmaps.
-            while (signatures.values.sumOf { it.pixels.size.toLong() * 4 } > 16L * 1024 * 1024) {
-                signatures.remove(signatures.keys.first())
-            }
+            val sample = prepared(candidate)?.signature ?: continue
             val bands = mutableListOf<IntRange>()
             val scale = image.width.toFloat() / candidate.getInt("width")
             val start = (candidate.getInt("removeTop") * scale * target.height / image.height).roundToInt()
