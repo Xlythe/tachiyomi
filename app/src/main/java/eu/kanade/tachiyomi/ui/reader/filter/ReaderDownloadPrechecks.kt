@@ -10,7 +10,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,9 +29,11 @@ internal object ReaderDownloadPrechecks {
         var cursor: Int = 0,
         var failures: Int = 0,
         var retryAt: Long = 0,
+        var rulesVersion: String = "",
         val generation: String = UUID.randomUUID().toString(),
     )
     private val gate = Any()
+    private val wake = Channel<Unit>(Channel.CONFLATED)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = LinkedHashMap<String, Item>()
     private var worker: Job? = null
@@ -52,7 +55,9 @@ internal object ReaderDownloadPrechecks {
                     val row = array.getJSONObject(i)
                     val uri = row.getString("uri")
                     require(uri.length <= 4096 && Uri.parse(uri).scheme in setOf("file", "content"))
-                    Item(uri, row.getBoolean("directory"), row.getInt("cursor").coerceIn(0, 10000))
+                    val version = row.optString("rulesVersion", "")
+                    require(version.isEmpty() || version.matches(Regex("[0-9a-f]{64}")))
+                    Item(uri, row.getBoolean("directory"), row.getInt("cursor").coerceIn(0, 10000), rulesVersion = version)
                 }
                 restored.forEach { jobs[it.uri] = it }
             }
@@ -63,10 +68,12 @@ internal object ReaderDownloadPrechecks {
     fun enqueue(uri: Uri, directory: Boolean) = synchronized(gate) {
         if (!::context.isInitialized || uri.scheme !in setOf("file", "content")) return@synchronized
         val value = uri.toString()
-        if (value.length > 4096) return@synchronized
-        if (value !in jobs) jobs[value] = Item(value, directory)
+        if (value.toByteArray().size > 4096) return@synchronized
+        // A new final chapter commit supersedes an older cursor at the same URI.
+        jobs[value] = Item(value, directory)
         while (jobs.size > 8) jobs.remove(jobs.keys.first())
         persistLocked()
+        wake.trySend(Unit)
         startLocked()
     }
 
@@ -74,7 +81,7 @@ internal object ReaderDownloadPrechecks {
         val rows = JSONArray(
             jobs.values.map { item ->
                 JSONObject().put("uri", item.uri)
-                    .put("directory", item.directory).put("cursor", item.cursor)
+                    .put("directory", item.directory).put("cursor", item.cursor).put("rulesVersion", item.rulesVersion)
             },
         )
         val output = index.startWrite()
@@ -104,7 +111,7 @@ internal object ReaderDownloadPrechecks {
                         }
                     }
                     if (finished) break
-                    delay(10_000)
+                    withTimeoutOrNull(10_000) { wake.receive() }
                     continue
                 }
                 val completed = try { process(next) } catch (e: Exception) {
@@ -135,16 +142,27 @@ internal object ReaderDownloadPrechecks {
     }
 
     private suspend fun process(item: Item): Boolean {
+        val version = ReaderImageRules.precheckVersion()
+        val cursor = synchronized(gate) {
+            val current = jobs[item.uri]?.takeIf { it.generation == item.generation } ?: return false
+            if (current.rulesVersion != version) {
+                current.cursor = 0
+                current.rulesVersion = version
+                persistLocked()
+            }
+            current.cursor
+        }
         val root = UniFile.fromUri(context, Uri.parse(item.uri)) ?: return false
         if (item.directory) {
             val files = (root.listFiles() ?: return false).filter { !it.isDirectory && eligible(it.name.orEmpty()) }
                 .sortedBy { it.name }
             if (files.size > 10000) return false
-            for (i in item.cursor until files.size) {
-                if (!stillQueued(item)) return false
+            for (i in cursor until files.size) {
+                if (!stillQueued(item) || ReaderImageRules.precheckVersion() != version) return false
                 val bytes = files[i].openInputStream().use { boundedBytes(it) }
                 if (bytes != null && !ReaderImageRules.precheckDownloaded(bytes)) return false
                 // Oversized inputs remain unknown, not a false clean decision.
+                if (ReaderImageRules.precheckVersion() != version) return false
                 advance(item, i + 1)
             }
         } else {
@@ -154,19 +172,20 @@ internal object ReaderDownloadPrechecks {
                 ZipFile(File("/proc/self/fd/${fd.fd}")).use { zip ->
                     val entries = zip.entries().asSequence().take(10001).toList()
                     if (entries.size > 10000) return false
-                    for (i in item.cursor until entries.size) {
-                        if (!stillQueued(item)) return false
+                    for (i in cursor until entries.size) {
+                        if (!stillQueued(item) || ReaderImageRules.precheckVersion() != version) return false
                         val entry = entries[i]
                         if (!entry.isDirectory && eligible(entry.name) && entry.size in 1..16L * 1024 * 1024) {
                             val bytes = zip.getInputStream(entry).use { boundedBytes(it) }
                             if (bytes != null && !ReaderImageRules.precheckDownloaded(bytes)) return false
                         }
-                        advance(item, i + 1)
+                        if (ReaderImageRules.precheckVersion() != version) return false
+                advance(item, i + 1)
                     }
                 }
             }
         }
-        return true
+        return ReaderImageRules.precheckVersion() == version
     }
 
     private fun eligible(name: String): Boolean = !name.endsWith(".tmp", true) &&

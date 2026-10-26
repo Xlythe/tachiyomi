@@ -55,7 +55,7 @@ class ReaderCheckedIntegrationTest {
     }
     private fun stored(hash: String): Boolean = File(context.filesDir, "reader-checked-v1").listFiles().orEmpty().any {
         it.name.endsWith(".checked") && runCatching {
-            DataInputStream(it.inputStream()).use { input -> input.readInt() == 0x52434431 && input.readUTF() == hash }
+            DataInputStream(it.inputStream()).use { input -> input.readInt() == 0x52434431 && input.readUTF() == hash && input.readUTF() == ReaderImageRules.matcherVersion }
         }.getOrDefault(false)
     }
     private fun queued(uri: Uri): Boolean = runCatching {
@@ -152,6 +152,40 @@ class ReaderCheckedIntegrationTest {
             assertArrayEquals(bytes, page.stream!!().use { it.readBytes() })
             assertFalse(page.isHidden)
         }
+    }
+
+    @Test fun emptyCorpusDoesNotCacheCorruptCompletedBytesAsClean() = runBlocking {
+        assertEquals(0, JSONArray(ReaderImageRules.export()).length())
+        val corrupt = byteArrayOf(6, 5, 4, 3, 2, 1)
+        assertFalse(ReaderImageRules.precheckDownloaded(corrupt))
+        assertFalse(stored(ReaderImageRules.hash(corrupt)))
+        val valid = fixture(61)
+        assertTrue(ReaderImageRules.precheckDownloaded(valid))
+        assertTrue(stored(ReaderImageRules.hash(valid)))
+        assertArrayEquals(valid, ReaderPage(0, stream = { valid.inputStream() }).stream!!().use { it.readBytes() })
+    }
+
+    @Test fun newCompletedChapterAtTheSameUriSupersedesTheOldCursor() = runBlocking {
+        val original = fixture(67); saveWhole(original)
+        val folder = root()
+        File(folder, "001.png").writeBytes(variant(original, "first-completed-generation"))
+        File(folder, "002.png").writeBytes(byteArrayOf(7, 6, 5))
+        val uri = Uri.fromFile(folder)
+        ReaderDownloadPrechecks.enqueue(uri, true)
+        await("First job must checkpoint its first page") {
+            runCatching {
+                val rows = JSONObject(File(context.filesDir, "reader-download-prechecks-v1.json").readText()).getJSONArray("jobs")
+                (0 until rows.length()).any {
+                    val row = rows.getJSONObject(it); row.getString("uri") == uri.toString() && row.getInt("cursor") == 1
+                }
+            }.getOrDefault(false)
+        }
+        val replacedFirst = variant(original, "replacement-completed-generation")
+        File(folder, "001.png").writeBytes(replacedFirst)
+        File(folder, "002.png").writeBytes(variant(original, "second-completed-generation"))
+        ReaderDownloadPrechecks.enqueue(uri, true)
+        await("Recommitted chapter must be checked from its first page") { !queued(uri) }
+        assertTrue(stored(ReaderImageRules.hash(replacedFirst))); firstDisplayHides(replacedFirst)
     }
 
     @Test fun preparePersistentDecisionsAndInterruptedDownloadForSeparateProcess() = runBlocking {

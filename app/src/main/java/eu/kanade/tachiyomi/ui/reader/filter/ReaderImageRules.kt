@@ -45,7 +45,7 @@ object ReaderImageRules {
 
     private lateinit var directory: File
     private lateinit var checkedStore: ReaderCheckedStore
-    private val matcherVersion = "legacy48-strip64-v1|${Build.FINGERPRINT}"
+    internal val matcherVersion = "legacy48-strip64-v2-complete|${Build.FINGERPRINT}"
     private data class CheckedSnapshot(
         val revision: Long,
         val rules: List<JSONObject>,
@@ -413,6 +413,8 @@ object ReaderImageRules {
         return bytes.inputStream()
     }
 
+    internal fun precheckVersion(): String = hash((checkedSnapshot().corpus + "|" + matcherVersion).toByteArray())
+
     /** Called only with complete final download bytes; shares in-flight work with the visible reader. */
     suspend fun precheckDownloaded(bytes: ByteArray): Boolean {
         currentCoroutineContext().ensureActive()
@@ -434,6 +436,15 @@ object ReaderImageRules {
 
     private fun evaluateChecked(bytes: ByteArray, snapshot: CheckedSnapshot): ReaderCheckedStore.Outcome = try {
         if (snapshot.rules.none { !it.has("watermark") }) {
+            // No applicable templates does not make a corrupt/truncated download a completed check.
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            require(bounds.outWidth > 0 && bounds.outHeight > 0)
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / inSampleSize > 1024) inSampleSize *= 2
+            }
+            requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)).recycle()
             ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())
         } else {
             ReaderImageMask(bytes).use { image ->

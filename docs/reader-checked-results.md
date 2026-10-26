@@ -37,3 +37,5 @@ interrupted/corrupt writes, error states, size/entry eviction, queue deduplicati
 stale completion. Android integration, real completed directory/CBZ downloads, process
 recreation and full-corpus cold/warm timing/memory are **pending**. Do not ship this source
 candidate until those pass. Compilation and disposable-emulator qualification use a separate private G: task directory; delivered builds and original evidence stay intact.
+
+Empty applicable corpora still require a successful bounded image decode before a clean precheck is recorded. Decoder failures remain unknown. Background checks run while the app process is alive; they resume on next app start after process death, and do not keep a separate service alive. Download completion means the files are committed, not that every optional precheck has finished.
