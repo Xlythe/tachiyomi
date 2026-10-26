@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
@@ -51,6 +52,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Synthetic interaction fixtures only: no detection/training or reconstruction-quality claim. */
+@OptIn(ExperimentalTestApi::class)
 class ReaderWatermarkDialogTest {
     @get:Rule val compose = createAndroidComposeRule<ReaderUiTestActivity>()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
