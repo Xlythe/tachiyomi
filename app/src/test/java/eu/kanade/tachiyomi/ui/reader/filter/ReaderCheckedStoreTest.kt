@@ -31,11 +31,11 @@ class ReaderCheckedStoreTest {
     }
 
     @Test
-    fun abandonedPendingFilesArePrunedBeforeStartingTheNextWrite() {
+    fun lowSpaceStillPrunesAbandonedPendingWithoutCreatingANewWrite() {
         val pending = File(directory, "${key().fileToken()}.123.pending").apply { writeBytes(ByteArray(4096)) }
         val keep = File(directory, "unowned.pending").apply { writeText("keep") }
-        val store = ReaderCheckedStore(directory, byteLimit = 2048)
-        assertTrue(store.write(key(), ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())))
+        val store = ReaderCheckedStore(directory, byteLimit = 2048, availableBytes = { 0L })
+        assertFalse(store.write(key(), ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())))
         assertFalse(pending.exists())
         assertTrue(keep.exists())
     }

@@ -15,6 +15,7 @@ internal class ReaderCheckedStore(
     private val entryLimit: Int = 4096,
     private val payloadLimit: Int = 16 * 1024 * 1024,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val availableBytes: () -> Long = { directory.usableSpace },
 ) {
     data class Key(val contentHash: String, val corpusVersion: String, val matcherVersion: String) {
         init {
@@ -94,7 +95,7 @@ internal class ReaderCheckedStore(
             var temporary: File? = null
             runCatching {
                 check(directory.isDirectory || directory.mkdirs())
-                if (directory.usableSpace < (result.rendered?.size ?: 0) + 16L * 1024 * 1024) return@runCatching false
+                if (availableBytes() < (result.rendered?.size ?: 0) + 16L * 1024 * 1024) return@runCatching false
                 val target = File(directory, "${key.fileToken()}.checked")
                 val backup = File(directory, "${target.name}.bak")
                 temporary = File.createTempFile("${key.fileToken()}.", ".pending", directory)
