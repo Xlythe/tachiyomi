@@ -1,5 +1,6 @@
 package eu.kanade.presentation.reader
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -7,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,12 +52,20 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import eu.kanade.tachiyomi.ui.reader.filter.ImageBounds
+import eu.kanade.tachiyomi.ui.reader.filter.ImagePoint
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageTransform
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderWatermarkEditor
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageMask
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageSnap
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -62,6 +73,9 @@ import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+// Cancelled native previews finish serially; a new dialog cannot accumulate full-page renderers.
+private val watermarkPreviewMutex = Mutex()
 
 /** The shaded, full-width band is removed; content above and below it is joined. */
 @Composable
@@ -86,9 +100,11 @@ fun ReaderImageMaskDialog(
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var watermarkMode by remember(page) { mutableStateOf(false) }
-    var circleStart by remember(page) { mutableStateOf<Offset?>(null) }
-    var circleEnd by remember(page) { mutableStateOf<Offset?>(null) }
+    var editor by remember(page) { mutableStateOf(ReaderWatermarkEditor("")) }
     var guessedPreview by remember(page) { mutableStateOf<ImageBitmap?>(null) }
+    var guessedToken by remember(page) { mutableStateOf<ReaderWatermarkEditor.Preview?>(null) }
+    var previewJob by remember(page) { mutableStateOf<Job?>(null) }
+    var showOriginal by remember(page) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -124,15 +140,83 @@ fun ReaderImageMaskDialog(
         if (it != null) transfer(true, it)
     }
 
-    fun watermarkArea(): Rect? {
-        val a = circleStart ?: return null
-        val b = circleEnd ?: return null
-        return Rect(
-            (minOf(a.x, b.x) * sourceWidth).roundToInt().coerceIn(1, (sourceWidth - 2).coerceAtLeast(1)),
-            (minOf(a.y, b.y) * height).roundToInt().coerceIn(0, height - 1),
-            (maxOf(a.x, b.x) * sourceWidth).roundToInt().coerceIn(1, (sourceWidth - 1).coerceAtLeast(1)),
-            (maxOf(a.y, b.y) * height).roundToInt().coerceIn(0, height),
-        )
+    fun updateEditor(next: ReaderWatermarkEditor) {
+        if (next.revision != editor.revision || next.imageKey != editor.imageKey || next.closed) {
+            previewJob?.cancel()
+            guessedPreview = null
+            guessedToken = null
+            showOriginal = false
+        }
+        editor = next
+    }
+
+    fun dismissEditor() {
+        updateEditor(editor.close())
+        onDismiss()
+    }
+
+    fun stopPreview() {
+        previewJob?.cancel()
+        editor = editor.cancelPreview()
+        guessedPreview = null
+        guessedToken = null
+    }
+
+    fun watermarkArea(): Rect? = editor.selection?.pixels(sourceWidth, height)?.let {
+        Rect(it.left, it.top, it.right, it.bottom)
+    }
+
+    fun imageTransform(viewportWidth: Float, viewportHeight: Float, padding: Float) = ReaderImageTransform(
+        sourceWidth, height, viewportWidth.toDouble(), viewportHeight.toDouble(), padding.toDouble(),
+        zoom.toDouble(), ImagePoint(pan.x.toDouble(), pan.y.toDouble()),
+    )
+
+    DisposableEffect(page) { onDispose { previewJob?.cancel() } }
+
+    fun requestPreview() {
+        val raw = bytes ?: return
+        val next = editor.requestPreview(sourceWidth, height)
+        val token = next.pending ?: return
+        previewJob?.cancel()
+        editor = next
+        guessedPreview = null
+        guessedToken = null
+        showOriginal = false
+        error = null
+        previewJob = scope.launch {
+            var generated: Bitmap? = null
+            var published = false
+            try {
+                withContext(Dispatchers.IO) {
+                    watermarkPreviewMutex.withLock {
+                        ensureActive()
+                        val area = token.area.let { Rect(it.left, it.top, it.right, it.bottom) }
+                        val rendered = ReaderImageMask(raw).use { it.renderWatermark(area) }
+                        ensureActive()
+                        val options = BitmapFactory.Options().apply {
+                            inSampleSize = 1
+                            while (maxOf(sourceWidth, height) / inSampleSize > 2048) inSampleSize *= 2
+                        }
+                        generated = requireNotNull(BitmapFactory.decodeByteArray(rendered, 0, rendered.size, options))
+                        ensureActive()
+                    }
+                }
+                if (editor.pending == token && !editor.closed) {
+                    editor = editor.completePreview(token)
+                    guessedPreview = requireNotNull(generated).asImageBitmap()
+                    guessedToken = token
+                    published = true
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                if (editor.pending == token && !editor.closed) {
+                    editor = editor.failPreview(token)
+                    error = e.message ?: "Could not preview watermark"
+                }
+            } finally {
+                if (!published) generated?.recycle()
+            }
+        }
     }
 
     LaunchedEffect(page) {
@@ -147,21 +231,23 @@ fun ReaderImageMaskDialog(
                     while (maxOf(bounds.outWidth, bounds.outHeight) / inSampleSize > 2048) inSampleSize *= 2
                 }
                 val bitmap = requireNotNull(BitmapFactory.decodeByteArray(raw, 0, raw.size, options))
-                Triple(raw, bitmap.asImageBitmap(), bounds.outHeight)
+                Triple(raw, bitmap.asImageBitmap(), bounds.outWidth to bounds.outHeight)
             }
             val rule = withContext(Dispatchers.IO) { ReaderImageRules.selection(loaded.first) }
             edges = withContext(Dispatchers.IO) { ReaderImageMask(loaded.first).use { it.contrastEdges() } }
             bytes = loaded.first
             preview = loaded.second
-            height = loaded.third
-            sourceWidth = withContext(Dispatchers.IO) { ReaderImageMask(loaded.first).use { it.width } }
+            sourceWidth = loaded.third.first
+            height = loaded.third.second
+            updateEditor(ReaderWatermarkEditor(ReaderImageRules.hash(loaded.first)))
             existingHash = rule?.getString("sha256")
             top = (rule?.getInt("removeTop") ?: 0).toFloat() / height
             bottom = (rule?.getInt("removeBottom") ?: height).toFloat() / height
             rule?.optJSONArray("watermark")?.let {
                 watermarkMode = true
-                circleStart = Offset(it.getInt(0).toFloat() / sourceWidth, it.getInt(1).toFloat() / height)
-                circleEnd = Offset(it.getInt(2).toFloat() / sourceWidth, it.getInt(3).toFloat() / height)
+                updateEditor(ReaderWatermarkEditor(editor.imageKey,
+                    ImageBounds(it.getInt(0).toDouble(), it.getInt(1).toDouble(),
+                        it.getInt(2).toDouble(), it.getInt(3).toDouble())))
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -171,6 +257,10 @@ fun ReaderImageMaskDialog(
 
     fun commit(restore: Boolean) {
         val raw = bytes ?: return
+        if (!restore && watermarkMode && !editor.canApply(sourceWidth, height)) return
+        val savedWatermark = if (!restore && watermarkMode) requireNotNull(watermarkArea()) else null
+        val start = (top * height).roundToInt().coerceIn(0, height - 1)
+        val end = (bottom * height).roundToInt().coerceIn(start + 1, height)
         busy = true
         error = null
         scope.launch {
@@ -179,22 +269,23 @@ fun ReaderImageMaskDialog(
                     if (restore) {
                         ReaderImageRules.remove(existingHash ?: ReaderImageRules.hash(raw))
                     } else {
-                        val start = (top * height).roundToInt().coerceIn(0, height - 1)
-                        val end = (bottom * height).roundToInt().coerceIn(start + 1, height)
-                        ReaderImageRules.save(
+                        fun save() = ReaderImageRules.save(
                             raw,
                             start,
                             end,
                             metadata,
                             replacingHash = existingHash,
-                            watermark = if (watermarkMode) requireNotNull(watermarkArea()) else null,
+                            watermark = savedWatermark,
                         )
+                        // Exact whole-image hides stay immediate even if cancelled native preview work remains.
+                        if (savedWatermark == null && start == 0 && end == height) save()
+                        else watermarkPreviewMutex.withLock { save() }
                     }
                 }
                 onRuleChanged(
-                    !restore && !watermarkMode && (top * height).roundToInt() == 0 &&
-                        (bottom * height).roundToInt() == height,
+                    !restore && savedWatermark == null && start == 0 && end == height,
                 )
+                updateEditor(editor.close())
                 onDismiss()
                 if (!restore) onApplied(ReaderImageRules.hash(raw))
             } catch (e: Exception) {
@@ -207,16 +298,16 @@ fun ReaderImageMaskDialog(
     }
 
     Dialog(
-        onDismissRequest = { if (!busy) onDismiss() },
+        onDismissRequest = { if (!busy) dismissEditor() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(MR.strings.action_cancel)) }
+                    TextButton(onClick = { dismissEditor() }, enabled = !busy) { Text(stringResource(MR.strings.action_cancel)) }
                     TextButton(onClick = {
                         commit(false)
-                    }, enabled = bytes != null && !busy && (!watermarkMode || guessedPreview != null)) {
+                    }, enabled = bytes != null && !busy && (!watermarkMode || editor.canApply(sourceWidth, height))) {
                         Text(stringResource(MR.strings.reader_mask_apply))
                     }
                 }
@@ -224,40 +315,37 @@ fun ReaderImageMaskDialog(
                 Text(stringResource(MR.strings.reader_mask_instructions))
                 Row {
                     TextButton(onClick = {
+                        stopPreview()
+                        updateEditor(editor.cancelGesture())
                         watermarkMode = !watermarkMode
-                        guessedPreview = null
                     }, enabled = !busy) {
                         Text(if (watermarkMode) "Crop spam instead" else "Circle watermark (experimental)")
                     }
                     if (watermarkMode) {
-                        TextButton(onClick = {
-                            val raw = bytes ?: return@TextButton
-                            val area = watermarkArea() ?: return@TextButton
-                            busy = true
-                            scope.launch {
-                                try {
-                                    guessedPreview = withContext(Dispatchers.IO) {
-                                        val rendered = ReaderImageMask(raw).use { it.renderWatermark(area) }
-                                        val options = BitmapFactory.Options().apply {
-                                            inSampleSize = 1
-                                            while (maxOf(sourceWidth, height) / inSampleSize > 2048) inSampleSize *= 2
-                                        }
-                                        requireNotNull(
-                                            BitmapFactory.decodeByteArray(rendered, 0, rendered.size, options),
-                                        ).asImageBitmap()
-                                    }
-                                    error = null
-                                } catch (e: Exception) {
-                                    if (e is CancellationException) throw e
-                                    error = e.message ?: "Could not preview watermark"
-                                } finally { busy = false }
+                        TextButton(onClick = { requestPreview() },
+                            enabled = !busy && !editor.gesturing && editor.pending == null && watermarkArea() != null) {
+                            Text("Preview guess")
+                        }
+                        TextButton(onClick = { updateEditor(editor.undo()); error = null },
+                            enabled = !busy && !editor.gesturing && editor.canUndo) { Text("Undo selection") }
+                    }
+                }
+                if (watermarkMode) {
+                    Row {
+                        if (editor.pending != null) {
+                            TextButton(onClick = { stopPreview() }) { Text("Stop preview") }
+                            CircularProgressIndicator()
+                        }
+                        if (editor.ready == guessedToken && guessedPreview != null) {
+                            TextButton(onClick = { showOriginal = !showOriginal }) {
+                                Text(if (showOriginal) "Show estimate" else "Show original")
                             }
-                        }, enabled = !busy && circleEnd != null) { Text("Preview guess") }
+                        }
                     }
                 }
                 if (watermarkMode) {
                     Text(
-                        "Drag an oval around a small watermark, then preview. " +
+                        "Drag an oval around a small watermark, then preview. Pinch to inspect; Undo changes the selection. " +
                             "Interpolation guesses hidden pixels and may blur artwork. " +
                             "Applies only to this exact image. More circles do not train automatic removal.",
                     )
@@ -269,8 +357,24 @@ fun ReaderImageMaskDialog(
                             1f,
                         ).fillMaxWidth().testTag("reader_image_mask").clipToBounds().semantics {
                             contentDescription = if (watermarkMode) "Watermark selection" else "Crop selection"
-                            stateDescription =
-                                "Rows ${(top * height).roundToInt()} to ${(bottom * height).roundToInt()}"
+                            stateDescription = if (watermarkMode) {
+                                editor.displayedSelection?.let {
+                                    "Oval ${it.left.roundToInt()}, ${it.top.roundToInt()} to " +
+                                        "${it.right.roundToInt()}, ${it.bottom.roundToInt()} source pixels"
+                                } ?: "No watermark selected"
+                            } else "Rows ${(top * height).roundToInt()} to ${(bottom * height).roundToInt()}"
+                            if (!busy && watermarkMode && !editor.gesturing && editor.selection != null) {
+                                customActions = listOf(
+                                    "Move oval left one pixel" to (-1.0 to 0.0),
+                                    "Move oval right one pixel" to (1.0 to 0.0),
+                                    "Move oval up one pixel" to (0.0 to -1.0),
+                                    "Move oval down one pixel" to (0.0 to 1.0),
+                                ).map { (label, delta) -> CustomAccessibilityAction(label) {
+                                    updateEditor(editor.select(requireNotNull(editor.selection)
+                                        .shifted(delta.first, delta.second, sourceWidth, height)))
+                                    true
+                                } }
+                            }
                             if (!busy && !watermarkMode) {
                                 customActions = listOf(
                                     CustomAccessibilityAction("Move upper handle up one pixel") {
@@ -293,31 +397,15 @@ fun ReaderImageMaskDialog(
                             }
                         }.pointerInput(image, busy, watermarkMode) {
                             if (busy) return@pointerInput
-                            fun geometry(): Pair<Float, Float> {
-                                val scale = minOf(
-                                    (size.width - 48.dp.toPx()) / image.width,
-                                    (size.height - 48.dp.toPx()) / image.height,
-                                ).coerceAtLeast(0.01f) * zoom
-                                val drawnHeight = image.height * scale
-                                return ((size.height - drawnHeight) / 2f + pan.y) to drawnHeight
+                            fun transform() = imageTransform(size.width.toFloat(), size.height.toFloat(), 24.dp.toPx())
+                            fun geometry(): Pair<Float, Float> = transform().let {
+                                it.origin.y.toFloat() to it.drawnHeight.toFloat()
                             }
                             awaitEachGesture {
                                 val down = awaitFirstDown()
                                 val (y, drawnHeight) = geometry()
-                                fun point(position: Offset): Offset {
-                                    val (_, drawn) = geometry()
-                                    val drawnWidth = drawn * image.width / image.height
-                                    val x = (size.width - drawnWidth) / 2f + pan.x
-                                    return Offset(
-                                        ((position.x - x) / drawnWidth).coerceIn(0f, 1f),
-                                        ((position.y - geometry().first) / drawn).coerceIn(0f, 1f),
-                                    )
-                                }
-                                if (watermarkMode) {
-                                    circleStart = point(down.position)
-                                    circleEnd = circleStart
-                                    guessedPreview = null
-                                }
+                                if (watermarkMode) updateEditor(editor.begin(transform().watermarkPoint(
+                                    ImagePoint(down.position.x.toDouble(), down.position.y.toDouble()))))
                                 val topDistance = abs(down.position.y - (y + drawnHeight * top))
                                 val bottomDistance = abs(down.position.y - (y + drawnHeight * bottom))
                                 var handle = if (minOf(topDistance, bottomDistance) <= 32.dp.toPx()) {
@@ -333,49 +421,69 @@ fun ReaderImageMaskDialog(
                                     if (handle == 0) 0f else (top + 1f / height).coerceAtMost(1f),
                                     if (handle == 0) (bottom - 1f / height).coerceAtLeast(0f) else 1f,
                                 )
-                                do {
-                                    val event = awaitPointerEvent()
-                                    if (event.changes.count { it.pressed } > 1) {
-                                        handle = -1
-                                        zoom = (zoom * event.calculateZoom()).coerceIn(1f, 12f)
-                                        pan += event.calculatePan()
-                                    } else if (event.changes.any { it.pressed }) {
-                                        val drag = event.changes.first().positionChange()
-                                        val delta = drag.y / geometry().second.coerceAtLeast(1f)
+                                try {
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val pressed = event.changes.filter { it.pressed }
+                                        val multi = event.changes.any {
+                                            it.id != down.id && (it.pressed || it.previousPressed)
+                                        }
                                         if (watermarkMode) {
-                                            circleEnd = point(event.changes.first().position)
-                                        } else {
+                                            if (multi || editor.phase == ReaderWatermarkEditor.Phase.NAVIGATING) {
+                                                updateEditor(editor.navigate())
+                                                if (pressed.size > 1) {
+                                                    val centroid = event.calculateCentroid(useCurrent = false)
+                                                    val anchored = transform().toSource(ImagePoint(
+                                                        centroid.x.toDouble(), centroid.y.toDouble()))
+                                                    zoom = (zoom * event.calculateZoom()).coerceIn(1f, 12f)
+                                                    val projected = transform().toViewport(anchored)
+                                                    pan += centroid + event.calculatePan() -
+                                                        Offset(projected.x.toFloat(), projected.y.toFloat())
+                                                } else if (pressed.isNotEmpty() && zoom > 1f) {
+                                                    pan += event.calculatePan()
+                                                }
+                                            } else {
+                                                pressed.firstOrNull { it.id == down.id }?.let { change ->
+                                                    updateEditor(editor.move(transform().watermarkPoint(ImagePoint(
+                                                        change.position.x.toDouble(), change.position.y.toDouble())),
+                                                        (change.position - down.position).getDistance() >
+                                                            viewConfiguration.touchSlop))
+                                                }
+                                            }
+                                        } else if (pressed.size > 1) {
+                                            handle = -1
+                                            zoom = (zoom * event.calculateZoom()).coerceIn(1f, 12f)
+                                            pan += event.calculatePan()
+                                        } else if (pressed.isNotEmpty()) {
+                                            val drag = pressed.first().positionChange()
+                                            val delta = drag.y / geometry().second.coerceAtLeast(1f)
                                             when (handle) {
                                                 0 -> top = snap.moveBy(delta)
                                                 1 -> bottom = snap.moveBy(delta)
                                                 else -> if (zoom > 1f) pan += drag
                                             }
                                         }
-                                    }
-                                    val baseScale = minOf(
-                                        (size.width - 48.dp.toPx()) / image.width,
-                                        (size.height - 48.dp.toPx()) / image.height,
-                                    ).coerceAtLeast(0.01f)
-                                    val maxX = ((image.width * baseScale * zoom - size.width) / 2f + 24.dp.toPx())
-                                        .coerceAtLeast(0f)
-                                    val maxY = ((image.height * baseScale * zoom - size.height) / 2f + 24.dp.toPx())
-                                        .coerceAtLeast(0f)
-                                    pan = Offset(pan.x.coerceIn(-maxX, maxX), pan.y.coerceIn(-maxY, maxY))
-                                    event.changes.forEach { it.consume() }
-                                } while (event.changes.any { it.pressed })
+                                        val limits = transform()
+                                        pan = Offset(pan.x.coerceIn(-limits.maxPanX.toFloat(), limits.maxPanX.toFloat()),
+                                            pan.y.coerceIn(-limits.maxPanY.toFloat(), limits.maxPanY.toFloat()))
+                                        event.changes.forEach { it.consume() }
+                                    } while (event.changes.any { it.pressed })
+                                    if (watermarkMode) updateEditor(editor.finish())
+                                } catch (e: CancellationException) {
+                                    if (watermarkMode) updateEditor(editor.cancelGesture())
+                                    throw e
+                                }
                             }
                         },
                     ) {
-                        val scale = minOf(
-                            (size.width - 48.dp.toPx()) / image.width,
-                            (size.height - 48.dp.toPx()) / image.height,
-                        ).coerceAtLeast(0.01f) * zoom
-                        val width = image.width * scale
-                        val drawnHeight = image.height * scale
-                        val x = (size.width - width) / 2f + pan.x
-                        val y = (size.height - drawnHeight) / 2f + pan.y
+                        val transform = imageTransform(size.width, size.height, 24.dp.toPx())
+                        val width = transform.drawnWidth.toFloat()
+                        val drawnHeight = transform.drawnHeight.toFloat()
+                        val x = transform.origin.x.toFloat()
+                        val y = transform.origin.y.toFloat()
                         drawImage(
-                            guessedPreview ?: image,
+                            if (!showOriginal && editor.draft == null && editor.ready == guessedToken)
+                                guessedPreview ?: image else image,
                             dstOffset = IntOffset(x.roundToInt(), y.roundToInt()),
                             dstSize = IntSize(
                                 width.roundToInt().coerceAtLeast(1),
@@ -390,15 +498,12 @@ fun ReaderImageMaskDialog(
                             )
                         }
                         if (watermarkMode) {
-                            val a = circleStart
-                            val b = circleEnd
-                            if (a != null && b != null) {
-                                drawOval(
-                                    Color.White,
-                                    Offset(x + minOf(a.x, b.x) * width, y + minOf(a.y, b.y) * drawnHeight),
-                                    Size(abs(a.x - b.x) * width, abs(a.y - b.y) * drawnHeight),
-                                    style = Stroke(2.dp.toPx()),
-                                )
+                            editor.displayedSelection?.let { area ->
+                                val origin = transform.toViewport(ImagePoint(area.left, area.top))
+                                drawOval(Color.White, Offset(origin.x.toFloat(), origin.y.toFloat()),
+                                    Size(((area.right - area.left) * transform.scale).toFloat(),
+                                        ((area.bottom - area.top) * transform.scale).toFloat()),
+                                    style = Stroke(2.dp.toPx()))
                             }
                         }
                         (if (watermarkMode) emptyList() else listOf(top, bottom)).forEach { edge ->
