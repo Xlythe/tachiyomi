@@ -2,6 +2,8 @@ package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
 import android.view.View
 import android.view.ViewGroup
+import android.graphics.Bitmap
+import com.davemorrissey.labs.subscaleview.ImageSource
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -15,6 +17,24 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class WebtoonPageGeometryTest {
+    @Test
+    fun reservedPageMatchesTheActualImageLibraryAtFractionalFitWidths() = withPage { recycler, frame, geometry ->
+        val bitmap = Bitmap.createBitmap(599, 1000, Bitmap.Config.ARGB_8888)
+        val image = WebtoonSubsamplingImageView(frame.context)
+        try {
+            image.setImage(ImageSource.bitmap(bitmap))
+            image.measure(View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(4000, View.MeasureSpec.AT_MOST))
+            geometry.bind(599 to 1000)
+            layout(recycler, 901)
+            assertEquals("Wrapper must not add a row beyond the image view's natural fit-width extent",
+                image.measuredHeight, frame.height)
+        } finally {
+            image.recycle()
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+    }
+
     @Test
     fun legacyUnreservedPendingViewMeasuresZeroButBindingReservesViewport() = withPage(
         false,

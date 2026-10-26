@@ -4,7 +4,6 @@ import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
-import kotlin.math.roundToInt
 
 /** Keeps a pending decode measurable and ignores dimensions belonging to an older binding. */
 internal class WebtoonPageGeometry(
@@ -42,7 +41,7 @@ internal class WebtoonPageGeometry(
     fun hide(token: Long) {
         if (!isCurrent(token)) return
         hidden = true
-        resize(1)
+        resize(WebtoonPageSizing.hiddenHeight)
     }
 
     fun pending() {
@@ -58,7 +57,7 @@ internal class WebtoonPageGeometry(
         val margins = frame.layoutParams as? android.view.ViewGroup.MarginLayoutParams
         val width = (recycler.width.takeIf { it > 0 } ?: frame.resources.displayMetrics.widthPixels) -
             (margins?.marginStart ?: 0) - (margins?.marginEnd ?: 0) - recycler.paddingLeft - recycler.paddingRight
-        return (width.coerceAtLeast(1).toDouble() * size.second / size.first).roundToInt().coerceAtLeast(1)
+        return WebtoonPageSizing.imageHeight(width, size.first, size.second)
     }
 
     private fun resize(height: Int) {
