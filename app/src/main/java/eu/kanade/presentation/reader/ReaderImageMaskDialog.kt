@@ -115,6 +115,13 @@ private fun ReaderImageMaskDialogContent(
     contrastEdges: suspend (ByteArray) -> List<Float>,
     watermarkPreviewRenderer: suspend (ByteArray, Rect) -> ByteArray,
 ) {
+    // Keep preparation and every state consumer in the dialog's composition. Publishing from
+    // the parent composition can race a dialog's initial snapshot and leave its loading UI stale.
+    var busy by remember(page) { mutableStateOf(false) }
+    Dialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
     var bytes by remember(page) { mutableStateOf<ByteArray?>(null) }
     var preview by remember(page) { mutableStateOf<ImageBitmap?>(null) }
     var height by remember(page) { mutableStateOf(1) }
@@ -125,7 +132,6 @@ private fun ReaderImageMaskDialogContent(
     var existingHash by remember(page) { mutableStateOf<String?>(null) }
     var zoom by remember(page) { mutableStateOf(1f) }
     var pan by remember(page) { mutableStateOf(Offset.Zero) }
-    var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var watermarkMode by remember(page) { mutableStateOf(false) }
@@ -622,10 +628,6 @@ private fun ReaderImageMaskDialogContent(
         }, enabled = !busy) { Text(stringResource(MR.strings.reader_restore_image)) }
     }
     }
-    Dialog(
-        onDismissRequest = { if (!busy) dismissEditor() },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
         Surface(Modifier.fillMaxSize()) {
             ReaderImageEditorLayout(toolbar, controls, imageContent, footer)
         }
