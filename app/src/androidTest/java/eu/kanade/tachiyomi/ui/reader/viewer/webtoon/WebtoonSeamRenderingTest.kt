@@ -45,6 +45,7 @@ class WebtoonSeamRenderingTest {
         parent.addView(recycler, FrameLayout.LayoutParams(width, 2600))
         val source = Bitmap.createBitmap(599, 1000, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.BLUE) }
         val frames = mutableListOf<ReaderPageImageView>()
+        val bindings = mutableMapOf<ReaderPageImageView, Pair<WebtoonPageGeometry, Long>>()
         recycler.adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             override fun getItemCount() = 8
             override fun onCreateViewHolder(group: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
@@ -55,7 +56,10 @@ class WebtoonSeamRenderingTest {
             }
             override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
                 val frame = holder.itemView as ReaderPageImageView
-                WebtoonPageGeometry(frame, recycler).bind(599 to 1000)
+                val geometry = WebtoonPageGeometry(frame, recycler)
+                val token = geometry.bind(599 to 1000)
+                bindings[frame] = geometry to token
+                frame.onImageLoaded = { geometry.loaded(token, 599, 1000) }
                 frame.setImage(
                     BitmapDrawable(context.resources, source),
                     ReaderPageImageView.Config(
@@ -74,6 +78,10 @@ class WebtoonSeamRenderingTest {
                 parent.layout(0, 0, width, 2600)
             }
             layout()
+            // Header sizing can occur before RecyclerView has a width. Resolve the real
+            // viewport before anchoring/capturing, just as the holder's metadata callback does.
+            bindings.values.toList().forEach { (geometry, token) -> geometry.metadata(token, 599, 1000) }
+            layout()
             (recycler.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(1, 100)
             layout()
             recycler.pivotX = width / 2f
@@ -84,6 +92,8 @@ class WebtoonSeamRenderingTest {
                 parent.draw(Canvas(output))
                 layout()
             }
+            assertEquals(100, (recycler.layoutManager as LinearLayoutManager).findViewByPosition(1)?.top)
+            parent.draw(Canvas(output))
             val boundary = (100 * zoom).roundToInt()
             for (y in boundary - 2..boundary + 2) {
                 assertEquals(
