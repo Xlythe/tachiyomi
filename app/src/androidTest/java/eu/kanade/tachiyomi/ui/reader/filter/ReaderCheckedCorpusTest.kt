@@ -61,8 +61,16 @@ class ReaderCheckedCorpusTest {
         report.put("importMs", SystemClock.elapsedRealtime() - importStart); assertOwned()
         check(!directory.exists()); check(directory.mkdirs())
         val list = rules()
-        val rule = (0 until list.length()).map { list.getJSONObject(it) }.filter { it.optBoolean("hide") }
-            .minBy { it.getInt("width").toLong() * it.getInt("height") }
+        val whole = (0 until list.length()).map { list.getJSONObject(it) }.filter { it.optBoolean("hide") }
+        report.put("wholeRulesBelow12SignatureRows", whole.count { it.getInt("height") * 48.0 / it.getInt("width") < 11.5 })
+        // This measures persisted inference, not a relaxation of the legacy minimum-height/texture guards.
+        val rule = whole.sortedBy { it.getInt("width").toLong() * it.getInt("height") }.first { candidate ->
+            ReaderImageMask(ReaderImageRules.original(candidate.getString("sha256")).readBytes()).use { image ->
+                val signature = image.signature()
+                signature.agrees(signature, 0, 0, signature.height)
+            }
+        }
+        report.put("positiveRuleHash", rule.getString("sha256"))
         val original = ReaderImageRules.original(rule.getString("sha256")).readBytes()
         val positive = original + "checked-corpus-positive-v1-$token".toByteArray()
         File(directory, "positive.bin").writeBytes(positive)
@@ -96,6 +104,22 @@ class ReaderCheckedCorpusTest {
         assertTrue("Whole inferred hide must finish and persist", withTimeout(180_000) { checking.await() })
         report.put("backgroundCheckAndConcurrentFixturesMs", SystemClock.elapsedRealtime() - checkStart)
         report.put("warmReadMs", readCachedHide(positive)).put("pssAfterKb", Debug.getPss())
+        val retainedRule = (0 until list.length()).map { list.getJSONObject(it) }
+            .filter { !it.optBoolean("hide") && it.getInt("removeTop") >= 200 }
+            .maxBy { it.getInt("removeTop") }
+        val raw = ReaderImageRules.original(retainedRule.getString("sha256")).readBytes()
+        val source = requireNotNull(BitmapFactory.decodeByteArray(raw, 0, raw.size))
+        val retained = Bitmap.createBitmap(source, 0, 0, source.width, retainedRule.getInt("removeTop"))
+        val negative = ByteArrayOutputStream().also { retained.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        retained.recycle(); source.recycle()
+        val negativeStart = SystemClock.elapsedRealtime()
+        assertTrue(withTimeout(180_000) { ReaderImageRules.precheckDownloaded(negative) })
+        val negativePage = ReaderPage(900, stream = { negative.inputStream() })
+        assertArrayEquals("User-retained manga region must stay intact after completed inference", negative,
+            negativePage.stream!!().use { it.readBytes() })
+        assertFalse("Retained manga must not become a durable hide", negativePage.isHidden)
+        report.put("retainedNegativeRuleHash", retainedRule.getString("sha256"))
+            .put("retainedNegativeCheckMs", SystemClock.elapsedRealtime() - negativeStart)
         val files = File(context.filesDir, "reader-checked-v1").listFiles().orEmpty()
         val owned = files.filter { it.name.matches(Regex("[0-9a-f]{64}\\.checked(\\.bak)?")) }
         report.put("derivedCacheBytes", owned.sumOf { it.length() }).put("derivedCacheEntries", owned.size)
