@@ -24,7 +24,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
-import eu.kanade.tachiyomi.ui.main.MainActivity
+import eu.kanade.tachiyomi.ui.reader.ReaderUiTestActivity
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.CompletableDeferred
@@ -39,7 +39,7 @@ import java.io.File
 
 class ReaderImageMaskDialogTest {
     @get:Rule
-    val compose = createAndroidComposeRule<MainActivity>()
+    val compose = createAndroidComposeRule<ReaderUiTestActivity>()
 
     private val bytes = Bitmap.createBitmap(600, 1800, Bitmap.Config.ARGB_8888).let { bitmap ->
         val canvas = Canvas(bitmap)
