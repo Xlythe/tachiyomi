@@ -17,7 +17,7 @@ open class ReaderPage(
     var stream: (() -> InputStream)?
         get() = originalStream?.let { original ->
             {
-                ReaderImageRules.open(
+                ReaderImageRules.openForDisplay(
                     onMatch = {
                         hidden = it
                         matchedRevision = ReaderImageRules.revision.value

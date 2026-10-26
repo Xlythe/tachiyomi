@@ -20,6 +20,18 @@ import kotlin.math.roundToInt
 /** User-authored rules are independent of sources and never overwrite chapter/download files. */
 object ReaderImageRules {
     val revision = MutableStateFlow(0L)
+    val automaticRevision = MutableStateFlow(0L)
+    private fun automaticGeneration() = "${revision.value}:"
+    private val automatic = ReaderAutomaticMatcher(
+        isCurrent = { it.startsWith(automaticGeneration()) },
+        onChanged = { automaticRevision.value++ },
+        evaluate = { bytes ->
+            var hidden = false
+            val output = open(onMatch = { hidden = it }) { bytes.inputStream() }.use { it.readBytes() }
+            ReaderAutomaticMatcher.Result(output.takeUnless { it.contentEquals(bytes) }, hidden)
+        },
+    )
+
     private lateinit var directory: File
 
     // Content providers can serve ADB calls before Application.onCreate installs Injekt.
@@ -48,8 +60,16 @@ object ReaderImageRules {
         }
     }
 
-    fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes)
-        .joinToString("") { "%02x".format(it) }
+    fun hash(bytes: ByteArray): String {
+        val digits = "0123456789abcdef"
+        return buildString(64) {
+            for (byte in MessageDigest.getInstance("SHA-256").digest(bytes)) {
+                val value = byte.toInt() and 255
+                append(digits[value ushr 4])
+                append(digits[value and 15])
+            }
+        }
+    }
 
     @Synchronized
     fun find(hash: String): JSONObject? = rules()[hash]?.let { JSONObject(it.toString()) }
@@ -301,25 +321,51 @@ object ReaderImageRules {
         return true
     }
 
-    /** Called on the reader's IO dispatcher for online, cached, downloaded and local images. */
+    /** Exact user edits are immediate; expensive automatic comparisons never block display. */
+    fun openForDisplay(onMatch: (Boolean) -> Unit = {}, original: () -> InputStream): InputStream {
+        val bytes = original().use { it.readBytes() }
+        val digest = hash(bytes)
+        val key: String
+        synchronized(this) {
+            val rule = rules()[digest]
+            val replacement = rule?.let { File(directory, it.getString("replacementFile")) }
+            if (rule != null && replacement?.isFile == true) {
+                val stream = replacement.inputStream()
+                onMatch(rule.optBoolean("hide"))
+                return stream
+            }
+            key = automaticGeneration() + digest
+            val ready = automatic.ready(key)
+            onMatch(ready?.hidden == true)
+            ready?.rendered?.let { return it.inputStream() }
+            if (ready != null || rules().values.none { !it.has("watermark") }) return bytes.inputStream()
+        }
+        automatic.enqueue(key, bytes)
+        return bytes.inputStream()
+    }
+
     @Synchronized
+    private fun snapshot() = rules().values.map { JSONObject(it.toString()) }
+
+    /** Optional evaluation; expensive decoding stays outside the shared rules monitor. */
     fun open(onMatch: (Boolean) -> Unit = {}, original: () -> InputStream): InputStream {
-        if (rules().isEmpty()) {
+        val candidates = snapshot()
+        if (candidates.isEmpty()) {
             onMatch(false)
             return original()
         }
         val bytes = original().use { it.readBytes() }
         val hash = hash(bytes)
-        val rule = rules()[hash]
+        val rule = candidates.firstOrNull { it.getString("sha256") == hash }
         val replacement = rule?.let { File(directory, it.getString("replacementFile")) }?.takeIf { it.exists() }
         if (replacement != null && rule != null && (rule.optBoolean("hide") || rule.has("watermark"))) {
             onMatch(rule.optBoolean("hide"))
             return replacement.inputStream()
         }
-        if (rules().values.any { !it.has("watermark") }) {
+        if (candidates.any { !it.has("watermark") }) {
             try {
                 ReaderImageMask(bytes).use { image ->
-                    val matches = matchingBands(image, rule?.takeUnless { it.has("watermark") })
+                    val matches = matchingBands(image, rule?.takeUnless { it.has("watermark") }, candidates)
                     if (matches.isNotEmpty()) {
                         val bands = ReaderImageSignature.merge(
                             matches.map { it.getInt("removeTop") until it.getInt("removeBottom") },
@@ -337,16 +383,37 @@ object ReaderImageRules {
         return bytes.inputStream()
     }
 
-    @Synchronized
     fun selection(bytes: ByteArray): JSONObject? {
         find(hash(bytes))?.let { return it }
-        return ReaderImageMask(bytes).use { matchingBands(it).firstOrNull() }
+        val candidates = snapshot()
+        return ReaderImageMask(bytes).use { matchingBands(it, null, candidates).firstOrNull() }
     }
 
-    private fun matchingBands(image: ReaderImageMask, exact: JSONObject? = null): List<JSONObject> {
+    private fun sampleSignature(candidate: JSONObject): ReaderImageSignature? = runCatching {
+        val key = candidate.toString()
+        synchronized(this) { signatures[key]?.let { return@runCatching it } }
+        val sample = ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
+            it.signature(candidate.getInt("removeTop"), candidate.getInt("removeBottom"))
+        }
+        synchronized(this) {
+            if (rules()[candidate.getString("sha256")]?.toString() == key) {
+                signatures[key] = sample
+                while (signatures.values.sumOf { it.pixels.size.toLong() * 4 } > 16L * 1024 * 1024) {
+                    signatures.remove(signatures.keys.first())
+                }
+            }
+        }
+        sample
+    }.getOrNull()
+
+    private fun matchingBands(
+        image: ReaderImageMask,
+        exact: JSONObject?,
+        candidates: List<JSONObject>,
+    ): List<JSONObject> {
         val matches = mutableListOf<JSONObject>()
         if (exact != null) matches += JSONObject(exact.toString())
-        val partialRules = rules().values.filter { it.has("maskPixelSha256") }
+        val partialRules = candidates.filter { it.has("maskPixelSha256") }
         val hashes = mutableMapOf<Pair<Int, Int>, String>()
         for (candidate in partialRules) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
@@ -372,19 +439,9 @@ object ReaderImageRules {
         // Old rules participate without migration: derive signatures from the preserved originals.
         val target = runCatching { image.signature() }.getOrNull() ?: return matches
         val edges by lazy { image.contrastEdges().map { (it * image.height).roundToInt() } }
-        for (candidate in rules().values.filter { !it.has("watermark") }) {
+        for (candidate in candidates.filter { !it.has("watermark") }) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
-            val sample = runCatching {
-                signatures.getOrPut(candidate.getString("sha256")) {
-                    ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
-                        it.signature(candidate.getInt("removeTop"), candidate.getInt("removeBottom"))
-                    }
-                }
-            }.getOrNull() ?: continue
-            // A corpus of small banners can stay warm without retaining decoded full-page bitmaps.
-            while (signatures.values.sumOf { it.pixels.size.toLong() * 4 } > 16L * 1024 * 1024) {
-                signatures.remove(signatures.keys.first())
-            }
+            val sample = sampleSignature(candidate) ?: continue
             val bands = mutableListOf<IntRange>()
             val scale = image.width.toFloat() / candidate.getInt("width")
             val start = (candidate.getInt("removeTop") * scale * target.height / image.height).roundToInt()
