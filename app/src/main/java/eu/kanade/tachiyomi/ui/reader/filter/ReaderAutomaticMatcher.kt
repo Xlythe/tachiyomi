@@ -1,5 +1,8 @@
 package eu.kanade.tachiyomi.ui.reader.filter
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +63,10 @@ internal class ReaderAutomaticMatcher(
         pending[key] = Request(bytes, foreground)
         if (worker?.isActive == true) return@synchronized
         val job = scope.launch(start = CoroutineStart.LAZY) {
-            while (true) {
+            val owner = currentCoroutineContext()[Job]
+            try {
+                while (true) {
+                    currentCoroutineContext().ensureActive()
                 val next = synchronized(lock) {
                     val entry = pending.entries.firstOrNull { it.value.foreground } ?: pending.entries.firstOrNull()
                     if (entry == null) {
@@ -73,10 +79,14 @@ internal class ReaderAutomaticMatcher(
                     }
                 } ?: break
                 val result = if (isCurrent(next.first)) {
-                    runCatching { evaluate(next.second.bytes) }.getOrElse { Result(complete = false) }
+                    try { evaluate(next.second.bytes) } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        Result(complete = false)
+                    }
                 } else {
                     Result(complete = false)
                 }
+                currentCoroutineContext().ensureActive()
                 var changed = false
                 synchronized(lock) {
                     active = null
@@ -96,6 +106,15 @@ internal class ReaderAutomaticMatcher(
                     }
                 }
                 if (changed) onChanged()
+                }
+            } finally {
+                synchronized(lock) {
+                    if (worker === owner) {
+                        active = null
+                        worker = null
+                        pending.clear()
+                    }
+                }
             }
         }
         worker = job

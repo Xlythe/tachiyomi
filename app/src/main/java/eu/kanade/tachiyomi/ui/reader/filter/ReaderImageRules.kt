@@ -415,6 +415,7 @@ object ReaderImageRules {
 
     /** Called only with complete final download bytes; shares in-flight work with the visible reader. */
     suspend fun precheckDownloaded(bytes: ByteArray): Boolean {
+        currentCoroutineContext().ensureActive()
         if (bytes.isEmpty() || bytes.size > 16 * 1024 * 1024) return false
         val snapshot = checkedSnapshot()
         val digest = hash(bytes)
