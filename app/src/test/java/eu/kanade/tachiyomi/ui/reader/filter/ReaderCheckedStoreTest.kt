@@ -20,6 +20,27 @@ class ReaderCheckedStoreTest {
         ReaderCheckedStore.Key(hash, corpus, matcher)
 
     @Test
+    fun renderedWholeHidePersistsItsNonemptyPngAcrossRestart() {
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 13, 10, 26, 10, 7)
+        val store = ReaderCheckedStore(directory)
+        assertTrue(store.write(key(), ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision(true, png), proofs)))
+        val hit = requireNotNull(ReaderCheckedStore(directory).read(key(), proofs))
+        assertTrue(hit.decision.hidden)
+        assertArrayEquals(png, hit.decision.rendered)
+        assertNull(ReaderCheckedStore(directory).read(key(), emptyMap()))
+    }
+
+    @Test
+    fun abandonedPendingFilesArePrunedBeforeStartingTheNextWrite() {
+        val pending = File(directory, "${key().fileToken()}.123.pending").apply { writeBytes(ByteArray(4096)) }
+        val keep = File(directory, "unowned.pending").apply { writeText("keep") }
+        val store = ReaderCheckedStore(directory, byteLimit = 2048)
+        assertTrue(store.write(key(), ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())))
+        assertFalse(pending.exists())
+        assertTrue(keep.exists())
+    }
+
+    @Test
     fun cleanSurvivesRestartAndAnotherChapterButNewRulesOrMatcherRequireCheckingAgain() {
         val first = ReaderCheckedStore(directory)
         assertTrue(first.write(key(), ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())))
