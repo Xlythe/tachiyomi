@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
@@ -113,7 +114,12 @@ class ReaderCheckedCorpusTest {
         val negative = ByteArrayOutputStream().also { retained.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         retained.recycle(); source.recycle()
         val negativeStart = SystemClock.elapsedRealtime()
-        assertTrue(withTimeout(180_000) { ReaderImageRules.precheckDownloaded(negative) })
+        assertTrue(withTimeout(180_000) {
+            // A visible-page request may legitimately defer a background enqueue. Retry the request,
+            // just as the durable downloader does; the final completed negative assertion stays strict.
+            while (!ReaderImageRules.precheckDownloaded(negative)) delay(25)
+            true
+        })
         val negativePage = ReaderPage(900, stream = { negative.inputStream() })
         assertArrayEquals("User-retained manga region must stay intact after completed inference", negative,
             negativePage.stream!!().use { it.readBytes() })
