@@ -431,7 +431,7 @@ object ReaderImageRules {
             currentCoroutineContext().ensureActive()
             delay(25)
         }
-        return snapshot.revision == revision.value && checkedStore.read(key, snapshot.proofs) != null
+        return snapshot.revision == revision.value && checkedStore.read(key, snapshot.proofs)?.needsRecheck == false
     }
 
     private fun evaluateChecked(bytes: ByteArray, snapshot: CheckedSnapshot): ReaderCheckedStore.Outcome = try {

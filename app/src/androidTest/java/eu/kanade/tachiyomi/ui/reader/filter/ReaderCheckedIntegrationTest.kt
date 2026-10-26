@@ -154,6 +154,21 @@ class ReaderCheckedIntegrationTest {
         }
     }
 
+    @Test fun cachedCropRemainsImmediateWhileAddedRulesRequireACompletedRefresh() = runBlocking {
+        val original = fixture(73)
+        ReaderImageRules.save(original, 100, 200, JSONObject()); ownedRules += ReaderImageRules.hash(original)
+        val inferred = variant(original, "cached-crop-invalidation")
+        assertTrue(ReaderImageRules.precheckDownloaded(inferred))
+        val unrelated = fixture(79); saveWhole(unrelated)
+        val page = ReaderPage(0, stream = { inferred.inputStream() })
+        val start = SystemClock.elapsedRealtime(); val result = page.stream!!().use { it.readBytes() }
+        assertTrue(SystemClock.elapsedRealtime() - start <= 750); assertFalse(page.isHidden)
+        val bitmap = requireNotNull(BitmapFactory.decodeByteArray(result, 0, result.size))
+        assertEquals(260, bitmap.height); bitmap.recycle()
+        assertTrue(ReaderImageRules.precheckDownloaded(inferred))
+        assertTrue(stored(ReaderImageRules.hash(inferred)))
+    }
+
     @Test fun emptyCorpusDoesNotCacheCorruptCompletedBytesAsClean() = runBlocking {
         assertEquals(0, JSONArray(ReaderImageRules.export()).length())
         val corrupt = byteArrayOf(6, 5, 4, 3, 2, 1)
