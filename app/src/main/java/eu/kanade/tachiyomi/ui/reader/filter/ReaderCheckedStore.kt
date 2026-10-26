@@ -28,7 +28,8 @@ internal class ReaderCheckedStore(
 
     data class Decision(val hidden: Boolean = false, val rendered: ByteArray? = null) {
         val matched get() = rendered != null
-        init { require(!hidden || rendered?.isEmpty() == true) }
+        // Hidden layout and encoded output are separate: the renderer returns a valid one-row PNG.
+        init { require(!hidden || rendered != null) }
     }
 
     sealed interface Outcome {
@@ -95,6 +96,8 @@ internal class ReaderCheckedStore(
             var temporary: File? = null
             runCatching {
                 check(directory.isDirectory || directory.mkdirs())
+                // Recover bounded disposable storage before a low-space early return or another allocation.
+                pruneLocked()
                 if (availableBytes() < (result.rendered?.size ?: 0) + 16L * 1024 * 1024) return@runCatching false
                 val target = File(directory, "${key.fileToken()}.checked")
                 val backup = File(directory, "${target.name}.bak")

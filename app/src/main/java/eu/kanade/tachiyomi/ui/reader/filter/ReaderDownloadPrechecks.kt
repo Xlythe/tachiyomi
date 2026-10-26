@@ -137,7 +137,7 @@ internal object ReaderDownloadPrechecks {
     private suspend fun process(item: Item): Boolean {
         val root = UniFile.fromUri(context, Uri.parse(item.uri)) ?: return false
         if (item.directory) {
-            val files = root.listFiles().orEmpty().filter { !it.isDirectory && eligible(it.name.orEmpty()) }
+            val files = (root.listFiles() ?: return false).filter { !it.isDirectory && eligible(it.name.orEmpty()) }
                 .sortedBy { it.name }
             if (files.size > 10000) return false
             for (i in item.cursor until files.size) {
