@@ -1,10 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.filter
 
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -107,6 +109,24 @@ class ReaderAutomaticMatcherTest {
         await { !matcher.isBusy("cancelled") }
         assertNull(matcher.ready("cancelled"))
         assertEquals(0, changes.get())
+    }
+
+    @Test
+    fun decoderAllocationFailureStaysUnknownInsteadOfEscapingTheOptionalWorker() {
+        val escaped = CountDownLatch(1)
+        val attempted = CountDownLatch(1)
+        val localScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> escaped.countDown() })
+        val matcher = ReaderAutomaticMatcher(localScope, 8, { true }, {}, {
+            attempted.countDown()
+            throw OutOfMemoryError("Synthetic decoder allocation failure; no allocation performed")
+        })
+        try {
+            matcher.enqueue("failed-decoder", byteArrayOf(1))
+            assertTrue(attempted.await(2, TimeUnit.SECONDS))
+            await { !matcher.isBusy("failed-decoder") }
+            assertFalse(escaped.await(200, TimeUnit.MILLISECONDS))
+            assertNull(matcher.ready("failed-decoder"))
+        } finally { localScope.cancel() }
     }
 
     private fun await(condition: () -> Boolean) {
