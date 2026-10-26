@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -90,7 +89,7 @@ class ReaderImageMaskDialogTest {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         val events = java.util.concurrent.CopyOnWriteArrayList<String>()
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 ReaderImageMaskDialog(
                     page,
                     JSONObject(),
@@ -131,7 +130,7 @@ class ReaderImageMaskDialogTest {
     fun optionalScanFailureLeavesApplyUsable() {
         val events = java.util.concurrent.CopyOnWriteArrayList<String>()
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 ReaderImageMaskDialog(
                     ReaderPage(0, stream = { bytes.inputStream() }),
                     JSONObject(),
@@ -169,7 +168,7 @@ class ReaderImageMaskDialogTest {
         val release = CompletableDeferred<Unit>()
         val saved = java.util.concurrent.CopyOnWriteArrayList<String>()
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 val current = selected.value
                 ReaderImageMaskDialog(
                     current,
@@ -210,7 +209,7 @@ class ReaderImageMaskDialogTest {
         var dismissed = false
         val page = ReaderPage(0, stream = { throw java.io.IOException("Synthetic downloaded file failure") })
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 ReaderImageMaskDialog(
                     page,
                     JSONObject(),
@@ -239,7 +238,7 @@ class ReaderImageMaskDialogTest {
         val saved = java.util.concurrent.CopyOnWriteArrayList<String>()
         var dismissed = false
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 ReaderImageMaskDialog(
                     page,
                     invalid,
@@ -274,7 +273,7 @@ class ReaderImageMaskDialogTest {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         val events = java.util.concurrent.CopyOnWriteArrayList<String>()
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 ReaderImageMaskDialog(
                     page,
                     JSONObject(),
@@ -300,7 +299,7 @@ class ReaderImageMaskDialogTest {
     fun defaultMaskCoversWholeImageAndBothHandlesCanSelectTheMiddle() {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 ReaderImageMaskDialog(page, JSONObject().put("seriesName", "Mask UI test"), {}, {})
             }
         }

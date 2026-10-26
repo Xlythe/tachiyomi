@@ -7,7 +7,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toPixelMap
@@ -83,7 +82,7 @@ class ReaderWatermarkDialogTest {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         ownedHashes += ReaderImageRules.hash(bytes); selected.value = page
         compose.setContent {
-            MaterialTheme {
+            ReaderUiTestHost {
                 selected.value?.let { current ->
                     if (renderer == null) ReaderImageMaskDialog(current, JSONObject(),
                         onDismiss = { selected.value = null }, onApplied = { applied += it }, contrastEdges = { emptyList() })

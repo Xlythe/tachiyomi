@@ -4,9 +4,9 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.SystemClock
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.test.platform.app.InstrumentationRegistry
 import eu.kanade.tachiyomi.ui.reader.ReaderUiTestActivity
@@ -47,14 +47,15 @@ class ReaderEditorReadinessTest(private val launch: Int) {
             }
         })
         compose.setContent {
+            val content: @Composable () -> Unit = {
             event("test content composed")
-            MaterialTheme {
                 ReaderImageMaskDialog(page, JSONObject(), {}, {}, contrastEdges = { bytes ->
                     event("preview published; optional enrichment started")
                     withContext(Dispatchers.IO) { ReaderImageMask(bytes).use { it.contrastEdges() } }
                         .also { event("optional enrichment completed") }
                 })
             }
+            if (launch % 2 == 0) ReaderUiTestHost(content) else MaterialTheme(content = content)
         }
         try {
             compose.waitUntil(15_000) {
