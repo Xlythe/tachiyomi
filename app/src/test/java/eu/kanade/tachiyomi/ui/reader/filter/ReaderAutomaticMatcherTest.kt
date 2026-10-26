@@ -89,6 +89,26 @@ class ReaderAutomaticMatcherTest {
         assertNull(matcher.ready("bad"))
     }
 
+    @Test
+    fun cancelledWorkerCannotPublishACompletedDecisionOrLeaveBusyStateBehind() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val changes = AtomicInteger()
+        val matcher = ReaderAutomaticMatcher(scope, 8, { true }, { changes.incrementAndGet() }, {
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            ReaderAutomaticMatcher.Result(byteArrayOf(7), true)
+        })
+        try {
+            matcher.enqueue("cancelled", byteArrayOf(1))
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            scope.cancel()
+        } finally { release.countDown() }
+        await { !matcher.isBusy("cancelled") }
+        assertNull(matcher.ready("cancelled"))
+        assertEquals(0, changes.get())
+    }
+
     private fun await(condition: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(5)
