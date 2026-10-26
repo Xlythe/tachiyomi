@@ -2,6 +2,7 @@ package eu.kanade.presentation.reader
 
 import android.graphics.BitmapFactory
 import android.graphics.Rect
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -52,6 +53,7 @@ import androidx.compose.ui.window.DialogProperties
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageMask
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageSnap
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderSpamReports
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -175,6 +177,7 @@ fun ReaderImageMaskDialog(
         error = null
         scope.launch {
             try {
+                var reportQueued = true
                 withContext(Dispatchers.IO) {
                     if (restore) {
                         ReaderImageRules.remove(existingHash ?: ReaderImageRules.hash(raw))
@@ -189,7 +192,17 @@ fun ReaderImageMaskDialog(
                             replacingHash = existingHash,
                             watermark = if (watermarkMode) requireNotNull(watermarkArea()) else null,
                         )
+                        if (!watermarkMode) {
+                            reportQueued = ReaderSpamReports.enqueueExplicit(ReaderImageRules.hash(raw), metadata)
+                        }
                     }
+                }
+                if (!reportQueued) {
+                    Toast.makeText(
+                        context,
+                        "Image rule saved; spam report could not be queued",
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
                 onRuleChanged(
                     !restore && !watermarkMode && (top * height).roundToInt() == 0 &&

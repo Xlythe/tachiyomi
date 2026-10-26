@@ -81,6 +81,7 @@ object ReaderImageRules {
         directory = target.apply { mkdirs() }
         checkedStore = ReaderCheckedStore(File(context.filesDir, "reader-checked-v1"))
         ReaderDownloadPrechecks.initialize(context.applicationContext)
+        ReaderSpamReports.initialize(context.applicationContext)
     }
     private val index get() = AtomicFile(File(directory, "rules.json"))
     private var loaded: MutableMap<String, JSONObject>? = null
