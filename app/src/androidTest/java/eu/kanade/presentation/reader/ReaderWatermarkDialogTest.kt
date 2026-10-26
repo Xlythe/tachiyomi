@@ -21,6 +21,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performClick
@@ -95,7 +97,18 @@ class ReaderWatermarkDialogTest {
         compose.onNodeWithText("Select watermark").performScrollTo().performClick()
     }
     private fun awaitMask() {
-        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        try {
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        } catch (error: Throwable) {
+            println("WATERMARK_EDITOR_READINESS_FAILURE: ${error.javaClass.name}; page=${selected.value?.index}")
+            runCatching { println(compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 8)) }
+            Thread.getAllStackTraces().filterKeys {
+                it.name == "main" || it.name.startsWith("DefaultDispatcher")
+            }.forEach { (thread, stack) ->
+                println("THREAD ${thread.name} ${thread.state}\n${stack.joinToString("\n")}")
+            }
+            throw error
+        }
         compose.waitForIdle()
     }
     private fun zoom3() {
