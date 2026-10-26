@@ -29,6 +29,7 @@ import java.util.zip.ZipOutputStream
 /** Native codec + real committed directory/CBZ + separate-instrumentation restart acceptance. */
 class ReaderCheckedIntegrationTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val fixtureToken = UUID.randomUUID().toString()
     private val ownedRules = mutableListOf<String>()
     private val ownedDirectories = mutableListOf<File>()
     private fun restartDirectory(): File {
@@ -46,7 +47,7 @@ class ReaderCheckedIntegrationTest {
         return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             .toByteArray().also { bitmap.recycle() }
     }
-    private fun variant(bytes: ByteArray, label: String) = bytes + label.toByteArray()
+    private fun variant(bytes: ByteArray, label: String) = bytes + (label + "-" + fixtureToken).toByteArray()
     private fun root(): File = File(context.cacheDir, "reader-checked-test-${UUID.randomUUID()}")
         .apply { check(mkdirs()); ownedDirectories += this }
     private fun saveWhole(bytes: ByteArray) {
