@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
@@ -71,7 +70,7 @@ class ReaderImageMaskDialogTest {
         val releaseScan = CompletableDeferred<Unit>()
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         val events = java.util.concurrent.CopyOnWriteArrayList<String>()
-        compose.activity.setContent {
+        compose.setContent {
             MaterialTheme {
                 ReaderImageMaskDialog(
                     page,
@@ -112,7 +111,7 @@ class ReaderImageMaskDialogTest {
     @Test
     fun optionalScanFailureLeavesApplyUsable() {
         val events = java.util.concurrent.CopyOnWriteArrayList<String>()
-        compose.activity.setContent {
+        compose.setContent {
             MaterialTheme {
                 ReaderImageMaskDialog(
                     ReaderPage(0, stream = { bytes.inputStream() }),
@@ -150,7 +149,7 @@ class ReaderImageMaskDialogTest {
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val saved = java.util.concurrent.CopyOnWriteArrayList<String>()
-        compose.activity.setContent {
+        compose.setContent {
             MaterialTheme {
                 val current = selected.value
                 ReaderImageMaskDialog(
@@ -191,7 +190,7 @@ class ReaderImageMaskDialogTest {
     fun downloadedFileErrorStopsTheSpinnerAndLeavesCancelUsable() {
         var dismissed = false
         val page = ReaderPage(0, stream = { throw java.io.IOException("Synthetic downloaded file failure") })
-        compose.activity.setContent {
+        compose.setContent {
             MaterialTheme {
                 ReaderImageMaskDialog(
                     page,
@@ -220,7 +219,7 @@ class ReaderImageMaskDialogTest {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         val saved = java.util.concurrent.CopyOnWriteArrayList<String>()
         var dismissed = false
-        compose.activity.setContent {
+        compose.setContent {
             MaterialTheme {
                 ReaderImageMaskDialog(
                     page,
@@ -255,7 +254,7 @@ class ReaderImageMaskDialogTest {
     fun applyingWholePagePublishesVisibilityOnUiBeforeDismissingEditor() {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         val events = java.util.concurrent.CopyOnWriteArrayList<String>()
-        compose.activity.setContent {
+        compose.setContent {
             MaterialTheme {
                 ReaderImageMaskDialog(
                     page,
@@ -281,7 +280,7 @@ class ReaderImageMaskDialogTest {
     @Test
     fun defaultMaskCoversWholeImageAndBothHandlesCanSelectTheMiddle() {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
-        compose.activity.setContent {
+        compose.setContent {
             MaterialTheme {
                 ReaderImageMaskDialog(page, JSONObject().put("seriesName", "Mask UI test"), {}, {})
             }
