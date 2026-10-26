@@ -5,11 +5,15 @@ import android.graphics.Color
 import android.os.SystemClock
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.test.platform.app.InstrumentationRegistry
 import eu.kanade.tachiyomi.ui.reader.ReaderUiTestActivity
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageMask
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +27,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FilterInputStream
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertArrayEquals
 
 /** Bounded fresh-activity diagnostic: every failure is retained, never retried into success. */
 @RunWith(Parameterized::class)
@@ -46,11 +54,17 @@ class ReaderEditorReadinessTest(private val launch: Int) {
                 override fun close() { super.close(); event("source closed") }
             }
         })
+        val secondRaw = raw + "second-page-$launch".toByteArray()
+        val second = ReaderPage(1, stream = { event("second source opened"); secondRaw.inputStream() })
+        val selected = mutableStateOf(page)
+        val published = AtomicInteger()
+        val saved = CopyOnWriteArrayList<String>()
         compose.setContent {
             val content: @Composable () -> Unit = {
             event("test content composed")
-                ReaderImageMaskDialog(page, JSONObject(), {}, {}, contrastEdges = { bytes ->
+                ReaderImageMaskDialog(selected.value, JSONObject(), {}, { saved += it }, contrastEdges = { bytes ->
                     event("preview published; optional enrichment started")
+                    published.set(if (bytes.contentEquals(secondRaw)) 2 else 1)
                     withContext(Dispatchers.IO) { ReaderImageMask(bytes).use { it.contrastEdges() } }
                         .also { event("optional enrichment completed") }
                 })
@@ -62,6 +76,16 @@ class ReaderEditorReadinessTest(private val launch: Int) {
                 compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty()
             }
             event("mask semantics visible")
+            compose.runOnIdle { selected.value = second }
+            compose.waitUntil(15_000) {
+                published.get() == 2 && compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("Apply").performClick()
+            compose.waitUntil(15_000) { saved.isNotEmpty() }
+            assertEquals(listOf(ReaderImageRules.hash(secondRaw)), saved)
+            assertNull(ReaderImageRules.find(ReaderImageRules.hash(raw)))
+            assertArrayEquals(secondRaw, ReaderImageRules.original(ReaderImageRules.hash(secondRaw)).readBytes())
+            event("second page hidden and original preserved")
         } finally {
             val text = StringBuilder().appendLine("launch=$launch autoAdvance=${compose.mainClock.autoAdvance} time=${compose.mainClock.currentTime}")
             events.forEach { text.appendLine(it) }
@@ -83,6 +107,7 @@ class ReaderEditorReadinessTest(private val launch: Int) {
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             File(context.getExternalFilesDir(null), "reader-readiness-launch-$launch.txt").writeText(text.toString())
             println("READER_READINESS_TRACE\n$text")
+            ReaderImageRules.remove(ReaderImageRules.hash(secondRaw))
         }
     }
 }

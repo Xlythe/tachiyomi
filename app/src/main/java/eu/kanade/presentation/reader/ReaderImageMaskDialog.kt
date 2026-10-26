@@ -99,10 +99,8 @@ fun ReaderImageMaskDialog(
         ReaderImageMask(raw).use { it.renderWatermark(area) }
     },
 ) {
-    // Navigating to another page disposes pending preparation/save UI callbacks for the old page.
-    key(page) {
-        ReaderImageMaskDialogContent(page, metadata, onDismiss, onApplied, onRuleChanged, contrastEdges, watermarkPreviewRenderer)
-    }
+    // Keep the modal window stable; its page-keyed content owns cancellation and preparation.
+    ReaderImageMaskDialogContent(page, metadata, onDismiss, onApplied, onRuleChanged, contrastEdges, watermarkPreviewRenderer)
 }
 
 @Composable
@@ -122,6 +120,7 @@ private fun ReaderImageMaskDialogContent(
         onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+    key(page) {
     var bytes by remember(page) { mutableStateOf<ByteArray?>(null) }
     var preview by remember(page) { mutableStateOf<ImageBitmap?>(null) }
     var height by remember(page) { mutableStateOf(1) }
@@ -631,5 +630,6 @@ private fun ReaderImageMaskDialogContent(
         Surface(Modifier.fillMaxSize()) {
             ReaderImageEditorLayout(toolbar, controls, imageContent, footer)
         }
+    }
     }
 }

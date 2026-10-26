@@ -189,9 +189,7 @@ class ReaderImageMaskDialogTest {
         try {
             compose.waitUntil(15_000) { started.isCompleted }
             compose.runOnIdle { selected.value = second }
-            compose.waitUntil(
-                15_000,
-            ) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+            awaitMaskWithDiagnostics()
             compose.onNodeWithText("Apply").performClick()
             compose.waitUntil(15_000) { saved.size == 1 }
             val secondHash = ReaderImageRules.hash(secondBytes)
