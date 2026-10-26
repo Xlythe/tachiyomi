@@ -79,7 +79,7 @@ internal class ReaderAutomaticMatcher(
                         }
                     } ?: break
                     val result = if (isCurrent(next.first)) {
-                        try { evaluate(next.second.bytes) } catch (error: Exception) {
+                        try { evaluate(next.second.bytes) } catch (error: Throwable) {
                             if (error is CancellationException) throw error
                             Result(complete = false)
                         }

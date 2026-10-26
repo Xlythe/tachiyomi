@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
@@ -63,6 +65,23 @@ class ReaderImageMaskDialogTest {
 
     @After
     fun cleanup() { ReaderImageRules.remove(ReaderImageRules.hash(bytes)) }
+
+    private fun awaitMaskWithDiagnostics() {
+        try {
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty()
+            }
+        } catch (error: Throwable) {
+            println("READER_EDITOR_READINESS_FAILURE: ${error.javaClass.name}")
+            runCatching { println(compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 8)) }
+            Thread.getAllStackTraces().filterKeys {
+                it.name == "main" || it.name.startsWith("DefaultDispatcher")
+            }.forEach { (thread, stack) ->
+                println("THREAD ${thread.name} ${thread.state}\n${stack.joinToString("\n")}")
+            }
+            throw error
+        }
+    }
 
     @Test
     fun wholeHideCommitsAndCanBeRepeatedWhileOptionalContrastScanningIsDelayed() {
@@ -122,7 +141,7 @@ class ReaderImageMaskDialogTest {
                 )
             }
         }
-        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        awaitMaskWithDiagnostics()
         compose.onNodeWithText("Apply").performClick()
         compose.waitUntil(15_000) { events.size == 1 }
     }
@@ -230,7 +249,7 @@ class ReaderImageMaskDialogTest {
                 )
             }
         }
-        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        awaitMaskWithDiagnostics()
         repeat(2) {
             compose.onNodeWithText("Apply").performClick()
             compose.waitUntil(15_000) {
@@ -268,7 +287,7 @@ class ReaderImageMaskDialogTest {
                 )
             }
         }
-        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        awaitMaskWithDiagnostics()
         compose.onNodeWithText("Apply").performClick()
         compose.waitUntil(15_000) { events.size == 3 }
         compose.runOnIdle {
@@ -285,7 +304,7 @@ class ReaderImageMaskDialogTest {
                 ReaderImageMaskDialog(page, JSONObject().put("seriesName", "Mask UI test"), {}, {})
             }
         }
-        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        awaitMaskWithDiagnostics()
         compose.onNodeWithText("Entire image will be hidden").assertExists()
         val mask = compose.onNodeWithTag("reader_image_mask")
         mask.performTouchInput {

@@ -31,6 +31,11 @@ class ReaderCheckedIntegrationTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val ownedRules = mutableListOf<String>()
     private val ownedDirectories = mutableListOf<File>()
+    private fun restartDirectory(): File {
+        val token = InstrumentationRegistry.getArguments().getString("readerCheckedRun") ?: "initial"
+        require(token.matches(Regex("[a-zA-Z0-9-]{1,40}")))
+        return File(context.cacheDir, "reader-checked-restart-fixtures-$token")
+    }
     private fun fixture(seed: Int): ByteArray {
         val bitmap = Bitmap.createBitmap(120, 360, Bitmap.Config.ARGB_8888)
         val random = java.util.Random(seed.toLong())
@@ -152,7 +157,7 @@ class ReaderCheckedIntegrationTest {
     @Test fun preparePersistentDecisionsAndInterruptedDownloadForSeparateProcess() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("readerCheckedRestart") == "prepare")
         assertEquals("Restart fixture needs isolated empty rules", 0, JSONArray(ReaderImageRules.export()).length())
-        val dir = File(context.cacheDir, "reader-checked-restart-fixtures")
+        val dir = restartDirectory()
         check(!dir.exists()); check(dir.mkdirs())
         val original = fixture(41)
         ReaderImageRules.save(original, 0, 360, JSONObject())
@@ -177,7 +182,7 @@ class ReaderCheckedIntegrationTest {
 
     @Test fun verifyRestartUsesDiskBeforeDisplayAndResumesCompletedDownload() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("readerCheckedRestart") == "verify")
-        val dir = File(context.cacheDir, "reader-checked-restart-fixtures")
+        val dir = restartDirectory()
         val receipt = JSONObject(File(dir, "receipt.json").readText())
         assertNotEquals("Must be another Android process", receipt.getInt("pid"), Process.myPid())
         ownedRules += receipt.getString("rule")
