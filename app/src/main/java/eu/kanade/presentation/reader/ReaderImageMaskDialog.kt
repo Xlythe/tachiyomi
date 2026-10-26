@@ -409,9 +409,11 @@ private fun ReaderImageMaskDialogContent(
         }
     }
     }
+    // Read readiness in this composition and capture its value as a slot input. Reading only
+    // inside the deferred slot can leave its initial loading branch skipped after publication.
+    val image = preview
     val imageContent: @Composable (Modifier) -> Unit = { imageModifier ->
         Column(imageModifier) {
-    val image = preview
     if (image != null) {
         Canvas(
             Modifier.weight(
