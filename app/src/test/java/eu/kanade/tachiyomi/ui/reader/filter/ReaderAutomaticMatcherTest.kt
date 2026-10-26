@@ -72,7 +72,7 @@ class ReaderAutomaticMatcherTest {
     }
 
     @Test
-    fun errorsAreCachedAsVisibleAndOversizedInputIsNotRetained() {
+    fun errorsRemainUnknownAndCanRetryWhileOversizedInputIsNotRetained() {
         val calls = AtomicInteger()
         val matcher = ReaderAutomaticMatcher(scope, 4, { true }, { error("No changed image") }, {
             calls.incrementAndGet()
@@ -80,16 +80,43 @@ class ReaderAutomaticMatcherTest {
         })
         matcher.enqueue("large", ByteArray(5))
         matcher.enqueue("bad", byteArrayOf(1))
-        await { matcher.ready("bad") != null }
-        repeat(5) { matcher.enqueue("bad", byteArrayOf(1)) }
-        assertEquals(1, calls.get())
+        await { calls.get() == 1 && !matcher.isBusy("bad") }
+        assertNull(matcher.ready("bad"))
+        matcher.enqueue("bad", byteArrayOf(1))
+        await { calls.get() == 2 && !matcher.isBusy("bad") }
+        assertEquals(2, calls.get())
         assertNull(matcher.ready("large"))
-        assertNull(matcher.ready("bad")!!.rendered)
+        assertNull(matcher.ready("bad"))
     }
 
     private fun await(condition: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
         while (!condition() && System.nanoTime() < deadline) Thread.sleep(5)
         assertTrue(condition())
+    }
+
+    @Test
+    fun downloadPrechecksCannotEvictVisibleWorkAndIdenticalRequestsShareOneComparison() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val evaluated = CopyOnWriteArrayList<Int>()
+        val matcher = ReaderAutomaticMatcher(scope, 8, { true }, {}, { bytes ->
+            evaluated += bytes[0].toInt()
+            if (bytes[0] == 1.toByte()) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            ReaderAutomaticMatcher.Result()
+        })
+        try {
+            matcher.enqueue("active", byteArrayOf(1), foreground = false)
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            matcher.enqueue("active", byteArrayOf(1))
+            matcher.enqueue("visible", byteArrayOf(2))
+            matcher.enqueue("download", byteArrayOf(3), foreground = false)
+        } finally { release.countDown() }
+        await { matcher.ready("visible") != null }
+        assertEquals(listOf(1, 2), evaluated)
+        assertNull(matcher.ready("download"))
     }
 }

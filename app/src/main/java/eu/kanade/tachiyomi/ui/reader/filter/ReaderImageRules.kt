@@ -3,7 +3,11 @@ package eu.kanade.tachiyomi.ui.reader.filter
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Rect
+import android.os.Build
 import android.util.AtomicFile
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,18 +30,57 @@ object ReaderImageRules {
         isCurrent = { it.startsWith(automaticGeneration()) },
         onChanged = { automaticRevision.value++ },
         evaluate = { bytes ->
-            var hidden = false
-            val output = open(onMatch = { hidden = it }) { bytes.inputStream() }.use { it.readBytes() }
-            ReaderAutomaticMatcher.Result(output.takeUnless { it.contentEquals(bytes) }, hidden)
+            val snapshot = checkedSnapshot()
+            val outcome = evaluateChecked(bytes, snapshot)
+            if (outcome is ReaderCheckedStore.Outcome.Complete) {
+                if (snapshot.revision == revision.value) {
+                    checkedStore.write(ReaderCheckedStore.Key(hash(bytes), snapshot.corpus, matcherVersion), outcome)
+                }
+                ReaderAutomaticMatcher.Result(outcome.decision.rendered, outcome.decision.hidden)
+            } else {
+                ReaderAutomaticMatcher.Result(complete = false)
+            }
         },
     )
 
     private lateinit var directory: File
+    private lateinit var checkedStore: ReaderCheckedStore
+    private val matcherVersion = "legacy48-strip64-v1|${Build.FINGERPRINT}"
+    private data class CheckedSnapshot(
+        val revision: Long,
+        val rules: List<JSONObject>,
+        val proofs: Map<String, String>,
+        val corpus: String,
+    )
+    private var checkedSnapshotCache: CheckedSnapshot? = null
+
+    @Synchronized
+    private fun checkedSnapshot(): CheckedSnapshot {
+        checkedSnapshotCache?.takeIf { it.revision == revision.value }?.let { return it }
+        val list = rules().values.map { JSONObject(it.toString()) }
+        val proofs = list.associate { rule ->
+            val effect = JSONObject()
+            for (field in listOf(
+                "sha256", "width", "height", "removeTop", "removeBottom", "hide",
+                "maskPixelSha256", "maskProbeSha256", "maskProbeOffset", "maskAlgorithm", "maskAnchor",
+                "watermark", "watermarkMethod",
+            )) {
+                if (rule.has(field)) effect.put(field, rule.get(field))
+            }
+            rule.getString("sha256") to hash(effect.toString().toByteArray())
+        }
+        val corpus = hash(proofs.toSortedMap().entries.joinToString("\n") { "${it.key}:${it.value}" }.toByteArray())
+        return CheckedSnapshot(revision.value, list, proofs, corpus).also { checkedSnapshotCache = it }
+    }
 
     // Content providers can serve ADB calls before Application.onCreate installs Injekt.
     @Synchronized
     fun initialize(context: Context) {
-        directory = File(context.filesDir, "reader-image-rules").apply { mkdirs() }
+        val target = File(context.filesDir, "reader-image-rules")
+        if (::directory.isInitialized && directory == target) return
+        directory = target.apply { mkdirs() }
+        checkedStore = ReaderCheckedStore(File(context.filesDir, "reader-checked-v1"))
+        ReaderDownloadPrechecks.initialize(context.applicationContext)
     }
     private val index get() = AtomicFile(File(directory, "rules.json"))
     private var loaded: MutableMap<String, JSONObject>? = null
@@ -321,28 +364,108 @@ object ReaderImageRules {
         return true
     }
 
-    /** Exact user edits are immediate; expensive automatic comparisons never block display. */
+    /** Persisted and exact decisions are checked before display; no native comparison runs here. */
     fun openForDisplay(onMatch: (Boolean) -> Unit = {}, original: () -> InputStream): InputStream {
         val bytes = original().use { it.readBytes() }
         val digest = hash(bytes)
-        val key: String
-        synchronized(this) {
-            val rule = rules()[digest]
-            val replacement = rule?.let { File(directory, it.getString("replacementFile")) }
-            if (rule != null && replacement?.isFile == true) {
-                val stream = replacement.inputStream()
-                onMatch(rule.optBoolean("hide"))
-                return stream
+        repeat(2) {
+            val snapshot: CheckedSnapshot
+            val memoryKey: String
+            synchronized(this) {
+                val rule = rules()[digest]
+                val replacement = rule?.let { File(directory, it.getString("replacementFile")) }
+                if (rule != null && replacement?.isFile == true) {
+                    val stream = replacement.inputStream()
+                    onMatch(rule.optBoolean("hide"))
+                    return stream
+                }
+                snapshot = checkedSnapshot()
+                memoryKey = automaticGeneration() + digest
+                val ready = automatic.ready(memoryKey)
+                if (ready != null) {
+                    onMatch(ready.hidden)
+                    return (ready.rendered ?: bytes).inputStream()
+                }
             }
-            key = automaticGeneration() + digest
-            val ready = automatic.ready(key)
-            onMatch(ready?.hidden == true)
-            ready?.rendered?.let { return it.inputStream() }
-            if (ready != null || rules().values.none { !it.has("watermark") }) return bytes.inputStream()
+            val disk = checkedStore.read(
+                ReaderCheckedStore.Key(digest, snapshot.corpus, matcherVersion),
+                snapshot.proofs,
+            )
+            synchronized(this) {
+                if (snapshot.revision == revision.value) {
+                    if (disk != null) {
+                        val result = ReaderAutomaticMatcher.Result(disk.decision.rendered, disk.decision.hidden)
+                        if (!disk.needsRecheck) {
+                            automatic.remember(memoryKey, result)
+                        } else {
+                            automatic.enqueue(memoryKey, bytes)
+                        }
+                        onMatch(result.hidden)
+                        return (result.rendered ?: bytes).inputStream()
+                    }
+                    onMatch(false)
+                    if (snapshot.rules.any { !it.has("watermark") }) automatic.enqueue(memoryKey, bytes)
+                    return bytes.inputStream()
+                }
+            }
         }
-        automatic.enqueue(key, bytes)
+        // Rapid concurrent edits are unknown, never a persisted clean verdict.
         return bytes.inputStream()
     }
+
+    /** Called only with complete final download bytes; shares in-flight work with the visible reader. */
+    suspend fun precheckDownloaded(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty() || bytes.size > 16 * 1024 * 1024) return false
+        val snapshot = checkedSnapshot()
+        val digest = hash(bytes)
+        val exact = snapshot.rules.firstOrNull { it.getString("sha256") == digest }
+        if (exact != null && File(directory, exact.getString("replacementFile")).isFile) return true
+        val key = ReaderCheckedStore.Key(digest, snapshot.corpus, matcherVersion)
+        checkedStore.read(key, snapshot.proofs)?.takeUnless { it.needsRecheck }?.let { return true }
+        val memoryKey = "${snapshot.revision}:$digest"
+        automatic.enqueue(memoryKey, bytes, foreground = false)
+        while (automatic.isBusy(memoryKey)) {
+            currentCoroutineContext().ensureActive()
+            delay(25)
+        }
+        return snapshot.revision == revision.value && checkedStore.read(key, snapshot.proofs) != null
+    }
+
+    private fun evaluateChecked(bytes: ByteArray, snapshot: CheckedSnapshot): ReaderCheckedStore.Outcome = try {
+        if (snapshot.rules.none { !it.has("watermark") }) {
+            ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())
+        } else {
+            ReaderImageMask(bytes).use { image ->
+                val exact = snapshot.rules.firstOrNull { it.getString("sha256") == hash(bytes) && !it.has("watermark") }
+                val evaluated = matchingBands(image, exact, snapshot.rules)
+                if (!evaluated.complete) {
+                    ReaderCheckedStore.Outcome.Incomplete
+                } else if (evaluated.matches.isEmpty()) {
+                    ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())
+                } else {
+                    val bands = ReaderImageSignature.merge(
+                        evaluated.matches.map {
+                            it.getInt("removeTop") until it.getInt("removeBottom")
+                        },
+                    )
+                    val rendered = image.render(bands)
+                    if (rendered.size > 16 * 1024 * 1024) {
+                        ReaderCheckedStore.Outcome.Incomplete
+                    } else {
+                        ReaderCheckedStore.Outcome.Complete(
+                            ReaderCheckedStore.Decision(
+                                bands.size == 1 && bands[0].first == 0 && bands[0].last == image.height - 1,
+                                rendered,
+                            ),
+                            evaluated.matches.map { it.getString("sha256") }.distinct().associateWith {
+                                requireNotNull(snapshot.proofs[it])
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    } catch (_: Exception) { ReaderCheckedStore.Outcome.Failed }
 
     @Synchronized
     private fun snapshot() = rules().values.map { JSONObject(it.toString()) }
@@ -365,7 +488,7 @@ object ReaderImageRules {
         if (candidates.any { !it.has("watermark") }) {
             try {
                 ReaderImageMask(bytes).use { image ->
-                    val matches = matchingBands(image, rule?.takeUnless { it.has("watermark") }, candidates)
+                    val matches = matchingBands(image, rule?.takeUnless { it.has("watermark") }, candidates).matches
                     if (matches.isNotEmpty()) {
                         val bands = ReaderImageSignature.merge(
                             matches.map { it.getInt("removeTop") until it.getInt("removeBottom") },
@@ -386,7 +509,7 @@ object ReaderImageRules {
     fun selection(bytes: ByteArray): JSONObject? {
         find(hash(bytes))?.let { return it }
         val candidates = snapshot()
-        return ReaderImageMask(bytes).use { matchingBands(it, null, candidates).firstOrNull() }
+        return ReaderImageMask(bytes).use { matchingBands(it, null, candidates).matches.firstOrNull() }
     }
 
     private fun sampleSignature(candidate: JSONObject): ReaderImageSignature? = runCatching {
@@ -406,12 +529,15 @@ object ReaderImageRules {
         sample
     }.getOrNull()
 
+    private data class BandEvaluation(val matches: List<JSONObject>, val complete: Boolean)
+
     private fun matchingBands(
         image: ReaderImageMask,
         exact: JSONObject?,
         candidates: List<JSONObject>,
-    ): List<JSONObject> {
+    ): BandEvaluation {
         val matches = mutableListOf<JSONObject>()
+        var complete = true
         if (exact != null) matches += JSONObject(exact.toString())
         val partialRules = candidates.filter { it.has("maskPixelSha256") }
         val hashes = mutableMapOf<Pair<Int, Int>, String>()
@@ -437,11 +563,15 @@ object ReaderImageRules {
             }
         }
         // Old rules participate without migration: derive signatures from the preserved originals.
-        val target = runCatching { image.signature() }.getOrNull() ?: return matches
+        val target = image.signature()
         val edges by lazy { image.contrastEdges().map { (it * image.height).roundToInt() } }
         for (candidate in candidates.filter { !it.has("watermark") }) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
-            val sample = sampleSignature(candidate) ?: continue
+            val sample = sampleSignature(candidate)
+            if (sample == null) {
+                complete = false
+                continue
+            }
             val bands = mutableListOf<IntRange>()
             val scale = image.width.toFloat() / candidate.getInt("width")
             val start = (candidate.getInt("removeTop") * scale * target.height / image.height).roundToInt()
@@ -471,6 +601,6 @@ object ReaderImageRules {
                 }
             }
         }
-        return matches
+        return BandEvaluation(matches, complete)
     }
 }

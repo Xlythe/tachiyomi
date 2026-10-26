@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.data.notification.NotificationHandler
 import eu.kanade.tachiyomi.source.UnmeteredSource
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadPrechecks
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.storage.DiskUtil.NOMEDIA_FILE
 import eu.kanade.tachiyomi.util.storage.saveTo
@@ -390,7 +391,8 @@ class Downloader(
             )
 
             // Only rename the directory if it's downloaded
-            if (downloadPreferences.saveChaptersAsCBZ().get()) {
+            val savedAsArchive = downloadPreferences.saveChaptersAsCBZ().get()
+            if (savedAsArchive) {
                 archiveChapter(mangaDir, chapterDirname, tmpDir)
             } else {
                 tmpDir.renameTo(chapterDirname)
@@ -400,6 +402,11 @@ class Downloader(
             DiskUtil.createNoMediaFile(tmpDir, context)
 
             download.status = Download.State.DOWNLOADED
+            // Never classify a .tmp/partial page or block completion on native matching.
+            runCatching {
+                val committed = mangaDir.findFile(if (savedAsArchive) "$chapterDirname.cbz" else chapterDirname)
+                if (committed != null) ReaderDownloadPrechecks.enqueue(committed.uri, committed.isDirectory)
+            }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             // If the page list threw, it will resume here
