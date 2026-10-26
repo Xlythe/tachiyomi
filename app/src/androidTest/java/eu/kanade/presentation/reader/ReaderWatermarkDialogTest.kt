@@ -11,7 +11,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toPixelMap
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -21,7 +20,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
@@ -155,9 +154,7 @@ class ReaderWatermarkDialogTest {
 
     @Test fun sampledOddImageUsesExactSourcePixelsAndSavedSelectionReopensWithoutAutoApply() {
         start(); zoom3(); draw(); assertArea()
-        mask().performSemanticsAction(SemanticsActions.CustomActions) { actions ->
-            assertTrue(actions.single { it.label == "Move oval right one pixel" }.action())
-        }
+        mask().performCustomAccessibilityActionWithLabel("Move oval right one pixel")
         assertArea(Rect(221, 1800, 381, 2000))
         compose.onNodeWithText("Undo selection").performScrollTo().performClick(); assertArea()
         preview(); assertOvalDrawnOnItsSourceBoundary()
