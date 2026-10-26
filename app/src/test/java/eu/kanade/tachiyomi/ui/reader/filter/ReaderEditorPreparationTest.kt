@@ -5,10 +5,44 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ReaderEditorPreparationTest {
+    @Test
+    fun sourceFailureRemainsAnErrorWithoutEnablingAnInvalidHide() {
+        var ready = false
+        assertThrows(java.io.IOException::class.java) {
+            runBlocking {
+                prepareReaderEditor(
+                    load = { throw java.io.IOException("Downloaded file unavailable") },
+                    onReady = { _: String -> ready = true },
+                    enrich = {},
+                )
+            }
+        }
+        assertEquals(false, ready)
+    }
+
+    @Test
+    fun cancellingAfterReadyStopsOptionalWorkWithoutPublishingASecondCompletion() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var ready = 0
+        val job = launch {
+            prepareReaderEditor(load = { "page" }, onReady = { ready++ }, enrich = {
+                started.complete(Unit)
+                release.await()
+            })
+        }
+        started.await()
+        job.cancelAndJoin()
+        assertEquals(1, ready)
+        release.complete(Unit)
+        assertEquals(1, ready)
+    }
+
     @Test
     fun slowOptionalScanningCannotKeepWholePageHideWaiting() = runBlocking {
         val scanning = CompletableDeferred<Unit>()
@@ -44,8 +78,15 @@ class ReaderEditorPreparationTest {
         val release = CompletableDeferred<Unit>()
         var ready = false
         val job = launch {
-            prepareReaderEditor(load = { started.complete(Unit); release.await(); "old page" },
-                onReady = { ready = true }, enrich = {})
+            prepareReaderEditor(
+                load = {
+                    started.complete(Unit)
+                    release.await()
+                    "old page"
+                },
+                onReady = { ready = true },
+                enrich = {},
+            )
         }
         started.await()
         job.cancelAndJoin()

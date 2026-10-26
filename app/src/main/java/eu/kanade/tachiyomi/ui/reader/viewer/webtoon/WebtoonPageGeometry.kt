@@ -55,9 +55,12 @@ internal class WebtoonPageGeometry(
         )
         val size = dimensions ?: return fallback
         val margins = frame.layoutParams as? android.view.ViewGroup.MarginLayoutParams
+        val manager = recycler.layoutManager
         val width = (recycler.width.takeIf { it > 0 } ?: frame.resources.displayMetrics.widthPixels) -
-            (margins?.marginStart ?: 0) - (margins?.marginEnd ?: 0) - recycler.paddingLeft - recycler.paddingRight
-        return WebtoonPageSizing.imageHeight(width, size.first, size.second)
+            (margins?.marginStart ?: 0) - (margins?.marginEnd ?: 0) - recycler.paddingLeft - recycler.paddingRight -
+            (manager?.getLeftDecorationWidth(frame) ?: 0) - (manager?.getRightDecorationWidth(frame) ?: 0) -
+            frame.paddingLeft - frame.paddingRight
+        return frame.paddingTop + frame.paddingBottom + WebtoonPageSizing.imageHeight(width, size.first, size.second)
     }
 
     private fun resize(height: Int) {

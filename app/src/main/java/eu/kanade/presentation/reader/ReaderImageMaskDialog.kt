@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,6 +53,7 @@ import androidx.compose.ui.window.DialogProperties
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageMask
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageSnap
+import eu.kanade.tachiyomi.ui.reader.filter.prepareReaderEditor
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -71,6 +73,24 @@ fun ReaderImageMaskDialog(
     onDismiss: () -> Unit,
     onApplied: (String) -> Unit,
     onRuleChanged: (Boolean) -> Unit = {},
+    contrastEdges: suspend (ByteArray) -> List<Float> = { raw ->
+        withContext(Dispatchers.IO) { ReaderImageMask(raw).use { it.contrastEdges() } }
+    },
+) {
+    // Navigating to another page disposes pending preparation/save UI callbacks for the old page.
+    key(page) {
+        ReaderImageMaskDialogContent(page, metadata, onDismiss, onApplied, onRuleChanged, contrastEdges)
+    }
+}
+
+@Composable
+private fun ReaderImageMaskDialogContent(
+    page: ReaderPage,
+    metadata: JSONObject,
+    onDismiss: () -> Unit,
+    onApplied: (String) -> Unit,
+    onRuleChanged: (Boolean) -> Unit,
+    contrastEdges: suspend (ByteArray) -> List<Float>,
 ) {
     var bytes by remember(page) { mutableStateOf<ByteArray?>(null) }
     var preview by remember(page) { mutableStateOf<ImageBitmap?>(null) }
@@ -136,33 +156,55 @@ fun ReaderImageMaskDialog(
     }
 
     LaunchedEffect(page) {
+        data class LoadedPreview(
+            val raw: ByteArray,
+            val bitmap: ImageBitmap,
+            val width: Int,
+            val height: Int,
+            val rule: JSONObject?,
+        )
         try {
-            val loaded = withContext(Dispatchers.IO) {
-                val raw = requireNotNull(page.originalStream) { "Image is not ready yet" }().use { it.readBytes() }
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
-                require(bounds.outHeight > 0 && bounds.outWidth > 0) { "Unsupported image" }
-                val options = BitmapFactory.Options().apply {
-                    inSampleSize = 1
-                    while (maxOf(bounds.outWidth, bounds.outHeight) / inSampleSize > 2048) inSampleSize *= 2
-                }
-                val bitmap = requireNotNull(BitmapFactory.decodeByteArray(raw, 0, raw.size, options))
-                Triple(raw, bitmap.asImageBitmap(), bounds.outHeight)
-            }
-            val rule = withContext(Dispatchers.IO) { ReaderImageRules.selection(loaded.first) }
-            edges = withContext(Dispatchers.IO) { ReaderImageMask(loaded.first).use { it.contrastEdges() } }
-            bytes = loaded.first
-            preview = loaded.second
-            height = loaded.third
-            sourceWidth = withContext(Dispatchers.IO) { ReaderImageMask(loaded.first).use { it.width } }
-            existingHash = rule?.getString("sha256")
-            top = (rule?.getInt("removeTop") ?: 0).toFloat() / height
-            bottom = (rule?.getInt("removeBottom") ?: height).toFloat() / height
-            rule?.optJSONArray("watermark")?.let {
-                watermarkMode = true
-                circleStart = Offset(it.getInt(0).toFloat() / sourceWidth, it.getInt(1).toFloat() / height)
-                circleEnd = Offset(it.getInt(2).toFloat() / sourceWidth, it.getInt(3).toFloat() / height)
-            }
+            prepareReaderEditor(
+                load = {
+                    withContext(Dispatchers.IO) {
+                        val raw = requireNotNull(
+                            page.originalStream,
+                        ) { "Image is not ready yet" }().use { it.readBytes() }
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+                        require(bounds.outHeight > 0 && bounds.outWidth > 0) { "Unsupported image" }
+                        val options = BitmapFactory.Options().apply {
+                            inSampleSize = 1
+                            while (maxOf(bounds.outWidth, bounds.outHeight) / inSampleSize > 2048) inSampleSize *= 2
+                        }
+                        val bitmap = requireNotNull(BitmapFactory.decodeByteArray(raw, 0, raw.size, options))
+                        // Exact local edits only: opening Hide must not start a full corpus comparison.
+                        LoadedPreview(
+                            raw,
+                            bitmap.asImageBitmap(),
+                            bounds.outWidth,
+                            bounds.outHeight,
+                            ReaderImageRules.find(ReaderImageRules.hash(raw)),
+                        )
+                    }
+                },
+                onReady = { loaded ->
+                    bytes = loaded.raw
+                    preview = loaded.bitmap
+                    height = loaded.height
+                    sourceWidth = loaded.width
+                    val rule = loaded.rule
+                    existingHash = rule?.getString("sha256")
+                    top = (rule?.getInt("removeTop") ?: 0).toFloat() / height
+                    bottom = (rule?.getInt("removeBottom") ?: height).toFloat() / height
+                    rule?.optJSONArray("watermark")?.let {
+                        watermarkMode = true
+                        circleStart = Offset(it.getInt(0).toFloat() / sourceWidth, it.getInt(1).toFloat() / height)
+                        circleEnd = Offset(it.getInt(2).toFloat() / sourceWidth, it.getInt(3).toFloat() / height)
+                    }
+                },
+                enrich = { loaded -> edges = contrastEdges(loaded.raw) },
+            )
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             error = e.message ?: "Could not load image"

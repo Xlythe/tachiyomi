@@ -1,13 +1,13 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
+import android.graphics.Bitmap
 import android.view.View
 import android.view.ViewGroup
-import android.graphics.Bitmap
-import com.davemorrissey.labs.subscaleview.ImageSource
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.davemorrissey.labs.subscaleview.ImageSource
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -18,17 +18,49 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class WebtoonPageGeometryTest {
     @Test
+    fun measuredContentWidthAccountsForPaddingMarginsAndItemDecorations() = withPage { recycler, frame, geometry ->
+        recycler.setPadding(7, 0, 11, 0)
+        frame.setPadding(13, 17, 19, 23)
+        frame.updateWebtoonPageLayout(9, 0)
+        recycler.addItemDecoration(object : RecyclerView.ItemDecoration() {
+            override fun getItemOffsets(
+                outRect: android.graphics.Rect,
+                view: View,
+                parent: RecyclerView,
+                state: RecyclerView.State,
+            ) {
+                outRect.set(3, 2, 5, 4)
+            }
+        })
+        val token = geometry.bind(599 to 1000)
+        layout(recycler, 901)
+        geometry.loaded(token, 599, 1000)
+        layout(recycler, 902)
+        val contentWidth = frame.width - frame.paddingLeft - frame.paddingRight
+        assertEquals(
+            frame.paddingTop + frame.paddingBottom +
+                (1000.0 / 599 * contentWidth).toInt(),
+            frame.height,
+        )
+    }
+
+    @Test
     fun reservedPageMatchesTheActualImageLibraryAtFractionalFitWidths() = withPage { recycler, frame, geometry ->
         val bitmap = Bitmap.createBitmap(599, 1000, Bitmap.Config.ARGB_8888)
         val image = WebtoonSubsamplingImageView(frame.context)
         try {
             image.setImage(ImageSource.bitmap(bitmap))
-            image.measure(View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(4000, View.MeasureSpec.AT_MOST))
+            image.measure(
+                View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(4000, View.MeasureSpec.AT_MOST),
+            )
             geometry.bind(599 to 1000)
             layout(recycler, 901)
-            assertEquals("Wrapper must not add a row beyond the image view's natural fit-width extent",
-                image.measuredHeight, frame.height)
+            assertEquals(
+                "Wrapper must not add a row beyond the image view's natural fit-width extent",
+                image.measuredHeight,
+                frame.height,
+            )
         } finally {
             image.recycle()
             if (!bitmap.isRecycled) bitmap.recycle()
@@ -90,7 +122,7 @@ class WebtoonPageGeometryTest {
             assertEquals(800, frame.height)
             geometry.hide(current)
             layout(recycler, 902)
-            assertEquals(1, frame.height)
+            assertEquals(0, frame.height)
             geometry.bind(null)
             layout(recycler, 903)
             assertTrue(frame.height > 1)

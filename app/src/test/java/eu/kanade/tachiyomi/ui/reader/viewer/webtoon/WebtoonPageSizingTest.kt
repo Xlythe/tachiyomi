@@ -25,8 +25,10 @@ class WebtoonPageSizingTest {
                 val measured = WebtoonPageSizing.imageHeight(content, width, height)
                 val painted = content.toDouble() * height / width
                 for (zoom in listOf(1.0, 1.25, 1.75, 3.0, 12.0)) {
-                    assertTrue(measured * zoom <= painted * zoom + 0.00001,
-                        "density=$density source=${width}x$height zoom=$zoom reserved=$measured painted=$painted")
+                    assertTrue(
+                        measured * zoom <= painted * zoom + 0.00001,
+                        "density=$density source=${width}x$height zoom=$zoom reserved=$measured painted=$painted",
+                    )
                 }
             }
         }

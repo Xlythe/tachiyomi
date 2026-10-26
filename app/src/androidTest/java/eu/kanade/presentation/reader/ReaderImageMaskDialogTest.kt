@@ -19,6 +19,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import kotlinx.coroutines.CompletableDeferred
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -55,6 +56,69 @@ class ReaderImageMaskDialogTest {
 
     @After
     fun cleanup() { ReaderImageRules.remove(ReaderImageRules.hash(bytes)) }
+
+    @Test
+    fun wholeHideCommitsAndCanBeRepeatedWhileOptionalContrastScanningIsDelayed() {
+        val scanStarted = CompletableDeferred<Unit>()
+        val releaseScan = CompletableDeferred<Unit>()
+        val page = ReaderPage(0, stream = { bytes.inputStream() })
+        val events = java.util.concurrent.CopyOnWriteArrayList<String>()
+        compose.activity.setContent {
+            MaterialTheme {
+                ReaderImageMaskDialog(
+                    page,
+                    JSONObject(),
+                    onDismiss = { events += "dismiss" },
+                    onApplied = { events += "saved" },
+                    onRuleChanged = {
+                        page.applyRuleVisibility(it)
+                        events += "visibility:$it"
+                    },
+                    contrastEdges = {
+                        scanStarted.complete(Unit)
+                        releaseScan.await()
+                        emptyList()
+                    },
+                )
+            }
+        }
+        try {
+            compose.waitUntil(15_000) { scanStarted.isCompleted }
+            compose.onNodeWithTag("reader_image_mask").assertExists()
+            repeat(2) { index ->
+                compose.onNodeWithText("Apply").performClick()
+                compose.waitUntil(15_000) { events.size == (index + 1) * 3 }
+                compose.runOnIdle { assertTrue(page.isHidden) }
+                val hash = ReaderImageRules.hash(bytes)
+                assertTrue(ReaderImageRules.find(hash)!!.getBoolean("hide"))
+                org.junit.Assert.assertArrayEquals(bytes, ReaderImageRules.original(hash).readBytes())
+                // Simulate a fresh index load; no RAM-only visibility assumption is sufficient.
+                ReaderImageRules::class.java.getDeclaredField("loaded").apply { isAccessible = true }.set(null, null)
+                assertTrue(ReaderImageRules.find(hash)!!.getBoolean("hide"))
+            }
+        } finally {
+            releaseScan.complete(Unit)
+        }
+    }
+
+    @Test
+    fun optionalScanFailureLeavesApplyUsable() {
+        val events = java.util.concurrent.CopyOnWriteArrayList<String>()
+        compose.activity.setContent {
+            MaterialTheme {
+                ReaderImageMaskDialog(
+                    ReaderPage(0, stream = { bytes.inputStream() }),
+                    JSONObject(),
+                    onDismiss = {},
+                    onApplied = { events += "saved" },
+                    contrastEdges = { throw java.io.IOException("Synthetic optional failure") },
+                )
+            }
+        }
+        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Apply").performClick()
+        compose.waitUntil(15_000) { events.size == 1 }
+    }
 
     @Test
     fun applyingWholePagePublishesVisibilityOnUiBeforeDismissingEditor() {
