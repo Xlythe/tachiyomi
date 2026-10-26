@@ -1,6 +1,6 @@
 # Persistent reader checks — source candidate, not released
 
-Based on delivered `fc001f8bb`; keeps its foreground display independent of native automatic
+Integrated with delivered seams/hide `df16b27d2`, originally based on `fc001f8bb`; keeps its foreground display independent of native automatic
 matching. No original chapter/download file is modified.
 
 `ReaderCheckedStore` holds clean decisions and inferred rendered decisions in private
@@ -13,7 +13,7 @@ comparison. Manual exact edits are checked first and always override inferred re
 Clean decisions require the same corpus. Positive decisions retain the hashes and semantic
 versions of supporting rules. Removing/changing a supporting rule invalidates the result.
 An unrelated added rule preserves a proven whole hide; a cached crop can display immediately
-while it is checked for additional bands. Metadata labels/timestamps do not invalidate results.
+while it is checked for additional bands. Metadata labels/timestamps do not invalidate results. Whole hides retain the renderer's valid one-row PNG alongside their zero-height display decision.
 Errors, missing templates, cancellation, unsupported images and incomplete checks never
 become a clean verdict. Checksums cover stored metadata and rendered bytes; replacement is
 staged/fsynced with backup recovery. Only derived cache files are evicted.
@@ -36,4 +36,4 @@ Validation so far: standalone JVM tests cover store restart/cross-chapter reuse,
 interrupted/corrupt writes, error states, size/entry eviction, queue deduplication/priority and
 stale completion. Android integration, real completed directory/CBZ downloads, process
 recreation and full-corpus cold/warm timing/memory are **pending**. Do not ship this source
-candidate until those pass. Heavy builds are paused for C:/D: capacity and output coordination.
+candidate until those pass. Compilation and disposable-emulator qualification use a separate private G: task directory; delivered builds and original evidence stay intact.

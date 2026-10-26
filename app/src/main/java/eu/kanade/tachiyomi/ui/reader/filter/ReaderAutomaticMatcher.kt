@@ -1,13 +1,13 @@
 package eu.kanade.tachiyomi.ui.reader.filter
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /** Optional comparisons cannot own a display stream or an unbounded chapter queue. */
@@ -67,45 +67,45 @@ internal class ReaderAutomaticMatcher(
             try {
                 while (true) {
                     currentCoroutineContext().ensureActive()
-                val next = synchronized(lock) {
-                    val entry = pending.entries.firstOrNull { it.value.foreground } ?: pending.entries.firstOrNull()
-                    if (entry == null) {
-                        active = null
-                        worker = null
-                        null
+                    val next = synchronized(lock) {
+                        val entry = pending.entries.firstOrNull { it.value.foreground } ?: pending.entries.firstOrNull()
+                        if (entry == null) {
+                            active = null
+                            worker = null
+                            null
+                        } else {
+                            active = entry.key
+                            (entry.key to entry.value).also { pending.remove(entry.key) }
+                        }
+                    } ?: break
+                    val result = if (isCurrent(next.first)) {
+                        try { evaluate(next.second.bytes) } catch (error: Exception) {
+                            if (error is CancellationException) throw error
+                            Result(complete = false)
+                        }
                     } else {
-                        active = entry.key
-                        (entry.key to entry.value).also { pending.remove(entry.key) }
-                    }
-                } ?: break
-                val result = if (isCurrent(next.first)) {
-                    try { evaluate(next.second.bytes) } catch (error: Exception) {
-                        if (error is CancellationException) throw error
                         Result(complete = false)
                     }
-                } else {
-                    Result(complete = false)
-                }
-                currentCoroutineContext().ensureActive()
-                var changed = false
-                synchronized(lock) {
-                    active = null
-                    if (isCurrent(next.first) && result.complete) {
-                        val bounded = if ((result.rendered?.size ?: 0) <= byteLimit) {
-                            result
-                        } else {
-                            Result(
-                                complete = false,
-                            )
-                        }
-                        if (bounded.complete) {
-                            results[next.first] = bounded
-                            trimResults()
-                            changed = bounded.rendered != null
+                    currentCoroutineContext().ensureActive()
+                    var changed = false
+                    synchronized(lock) {
+                        active = null
+                        if (isCurrent(next.first) && result.complete) {
+                            val bounded = if ((result.rendered?.size ?: 0) <= byteLimit) {
+                                result
+                            } else {
+                                Result(
+                                    complete = false,
+                                )
+                            }
+                            if (bounded.complete) {
+                                results[next.first] = bounded
+                                trimResults()
+                                changed = bounded.rendered != null
+                            }
                         }
                     }
-                }
-                if (changed) onChanged()
+                    if (changed) onChanged()
                 }
             } finally {
                 synchronized(lock) {
