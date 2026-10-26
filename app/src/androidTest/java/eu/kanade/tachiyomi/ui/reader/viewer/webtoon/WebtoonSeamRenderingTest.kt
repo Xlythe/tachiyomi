@@ -26,7 +26,7 @@ class WebtoonSeamRenderingTest {
         var failure: Throwable? = null
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
             try {
-                for (width in listOf(393, 601, 1032)) {
+                for (width in listOf(393, 540, 601, 1032)) {
                     for (zoom in listOf(1f, 1.25f, 1.75f, 3f)) renderBoundary(width, zoom)
                 }
             } catch (error: Throwable) { failure = error }
