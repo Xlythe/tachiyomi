@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
@@ -144,7 +145,7 @@ class ReaderWatermarkDialogTest {
     }
     private fun screenshot(name: String) {
         compose.waitForIdle()
-        val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        val bitmap = compose.onNodeWithTag("reader_image_editor_layout").captureToImage().asAndroidBitmap()
         File(context.getExternalFilesDir(null), name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
     }
@@ -219,14 +220,20 @@ class ReaderWatermarkDialogTest {
     @Test fun orientationKeepsAUsableCanvasAndReprojectsTheSameSourceOval() {
         start(); zoom3(); draw(); preview(); assertArea(); assertOvalDrawnOnItsSourceBoundary()
         instrumentation.runOnMainSync { compose.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
-        compose.waitUntil(15_000) { compose.activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
+        compose.waitUntil(15_000) {
+            val frame = compose.onNodeWithTag("reader_image_editor_layout").fetchSemanticsNode().boundsInRoot
+            compose.activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && frame.width > frame.height
+        }
         compose.waitForIdle(); assertArea(); compose.onNodeWithText("Apply").assertIsEnabled()
         val bounds = mask().fetchSemanticsNode().boundsInRoot
         assertTrue(bounds.width > 100 * compose.activity.resources.displayMetrics.density)
         assertTrue(bounds.height > 100 * compose.activity.resources.displayMetrics.density)
         assertOvalDrawnOnItsSourceBoundary(); screenshot("watermark-editor-landscape.png")
         instrumentation.runOnMainSync { compose.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
-        compose.waitUntil(15_000) { compose.activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT }
+        compose.waitUntil(15_000) {
+            val frame = compose.onNodeWithTag("reader_image_editor_layout").fetchSemanticsNode().boundsInRoot
+            compose.activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT && frame.height > frame.width
+        }
         compose.waitForIdle(); assertArea(); assertOvalDrawnOnItsSourceBoundary()
     }
 

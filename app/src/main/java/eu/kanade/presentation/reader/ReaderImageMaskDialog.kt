@@ -395,9 +395,8 @@ private fun ReaderImageMaskDialogContent(
                 }
             }
         }
-        Text("Draw an oval around the watermark. Pinch to inspect; Undo changes the selection. " +
-            "The preview guesses covered pixels and may blur artwork. " +
-            "It applies only to this image and does not learn automatic removal.")
+        Text("Draw an oval; pinch to inspect. Preview guesses pixels and may blur artwork. " +
+            "This image only; no automatic learning.", style = MaterialTheme.typography.bodySmall)
         if (editor.selection != null && watermarkArea() == null) {
             Text("Adjust the selection: it must cover at least 2 by 2 source pixels, " +
                 "stay inside the image, and contain at most one million pixels.",

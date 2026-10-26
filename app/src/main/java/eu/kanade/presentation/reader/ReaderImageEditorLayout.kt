@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 /** Keep the image viewport usable when rotated or when controls need more text space. */
@@ -24,7 +25,7 @@ internal fun ReaderImageEditorLayout(
     imageContent: @Composable (Modifier) -> Unit,
     footer: @Composable () -> Unit,
 ) {
-    BoxWithConstraints(Modifier.fillMaxSize().padding(16.dp)) {
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("reader_image_editor_layout").padding(16.dp)) {
         val wide = maxWidth > maxHeight
         val panelWidth = minOf(300.dp, maxWidth * 0.45f)
         val controlsHeight = maxHeight * 0.34f
