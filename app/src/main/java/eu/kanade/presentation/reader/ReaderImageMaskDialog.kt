@@ -487,6 +487,12 @@ private fun ReaderImageMaskDialogContent(
                     try {
                         do {
                             val event = awaitPointerEvent()
+                            // Compose represents Android ACTION_CANCEL as consumed pointer-up changes.
+                            // Another recognizer taking this gesture also cancels our uncommitted oval.
+                            if (watermarkMode && event.changes.any { it.isConsumed }) {
+                                updateEditor(editor.cancelGesture())
+                                break
+                            }
                             val pressed = event.changes.filter { it.pressed }
                             val multi = event.changes.any {
                                 it.id != down.id && (it.pressed || it.previousPressed)
