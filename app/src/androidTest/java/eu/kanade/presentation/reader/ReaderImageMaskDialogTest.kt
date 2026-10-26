@@ -1,14 +1,22 @@
 package eu.kanade.presentation.reader
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -118,6 +126,129 @@ class ReaderImageMaskDialogTest {
         compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Apply").performClick()
         compose.waitUntil(15_000) { events.size == 1 }
+    }
+
+    @Test
+    fun changingPagesCancelsOldPreparationAndSavesOnlyTheCurrentPage() {
+        val first = ReaderPage(0, stream = { bytes.inputStream() })
+        val secondBytes = requireNotNull(
+            BitmapFactory.decodeByteArray(
+                bytes,
+                0,
+                bytes.size,
+                BitmapFactory.Options().apply {
+                    inMutable = true
+                },
+            ),
+        ).let { bitmap ->
+            bitmap.setPixel(0, 0, Color.CYAN)
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+                .also { bitmap.recycle() }
+        }
+        val second = ReaderPage(1, stream = { secondBytes.inputStream() })
+        val selected = mutableStateOf(first)
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val saved = java.util.concurrent.CopyOnWriteArrayList<String>()
+        compose.activity.setContent {
+            MaterialTheme {
+                val current = selected.value
+                ReaderImageMaskDialog(
+                    current,
+                    JSONObject(),
+                    onDismiss = {},
+                    onApplied = { saved += it },
+                    onRuleChanged = { current.applyRuleVisibility(it) },
+                    contrastEdges = { raw ->
+                        if (raw.contentEquals(bytes)) {
+                            started.complete(Unit)
+                            release.await()
+                        }
+                        emptyList()
+                    },
+                )
+            }
+        }
+        try {
+            compose.waitUntil(15_000) { started.isCompleted }
+            compose.runOnIdle { selected.value = second }
+            compose.waitUntil(
+                15_000,
+            ) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Apply").performClick()
+            compose.waitUntil(15_000) { saved.size == 1 }
+            val secondHash = ReaderImageRules.hash(secondBytes)
+            assertEquals(listOf(secondHash), saved)
+            assertEquals(null, ReaderImageRules.find(ReaderImageRules.hash(bytes)))
+            assertTrue(ReaderImageRules.find(secondHash)!!.getBoolean("hide"))
+        } finally {
+            release.complete(Unit)
+            ReaderImageRules.remove(ReaderImageRules.hash(secondBytes))
+        }
+    }
+
+    @Test
+    fun downloadedFileErrorStopsTheSpinnerAndLeavesCancelUsable() {
+        var dismissed = false
+        val page = ReaderPage(0, stream = { throw java.io.IOException("Synthetic downloaded file failure") })
+        compose.activity.setContent {
+            MaterialTheme {
+                ReaderImageMaskDialog(
+                    page,
+                    JSONObject(),
+                    onDismiss = { dismissed = true },
+                    onApplied = {},
+                )
+            }
+        }
+        compose.waitUntil(15_000) {
+            compose.onAllNodesWithText("Synthetic downloaded file failure").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        assertEquals(
+            0,
+            compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
+                .fetchSemanticsNodes().size,
+        )
+        compose.onNodeWithText("Cancel").performClick()
+        compose.runOnIdle { assertTrue(dismissed) }
+    }
+
+    @Test
+    fun failedRuleSaveClearsBusyAndAllowsRetryOrCancelWithoutPublishingAHide() {
+        val invalid = object : JSONObject() { override fun toString() = "invalid" }
+        val page = ReaderPage(0, stream = { bytes.inputStream() })
+        val saved = java.util.concurrent.CopyOnWriteArrayList<String>()
+        var dismissed = false
+        compose.activity.setContent {
+            MaterialTheme {
+                ReaderImageMaskDialog(
+                    page,
+                    invalid,
+                    onDismiss = { dismissed = true },
+                    onApplied = { saved += it },
+                    contrastEdges = { emptyList() },
+                )
+            }
+        }
+        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        repeat(2) {
+            compose.onNodeWithText("Apply").performClick()
+            compose.waitUntil(15_000) {
+                compose.onAllNodes(hasText("JSONObject", substring = true))
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("Apply").assertIsEnabled()
+            assertEquals(
+                0,
+                compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
+                    .fetchSemanticsNodes().size,
+            )
+            assertEquals(0, saved.size)
+            assertEquals(null, ReaderImageRules.find(ReaderImageRules.hash(bytes)))
+        }
+        compose.onNodeWithText("Cancel").performClick()
+        compose.runOnIdle { assertTrue(dismissed) }
     }
 
     @Test
