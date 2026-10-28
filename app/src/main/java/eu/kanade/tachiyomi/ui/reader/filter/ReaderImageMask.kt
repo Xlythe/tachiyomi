@@ -91,6 +91,30 @@ internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
         } finally { small.recycle() }
     }
 
+    /** Only bounded thin edge regions use this resolution; the legacy48 signature is unchanged. */
+    fun detailedSignature(top: Int, bottom: Int, normalizedRows: Int? = null): ReaderImageSignature? {
+        require(top >= 0 && top < bottom && bottom <= height)
+        val rows = normalizedRows ?: ((bottom - top) * 192f / width).roundToInt()
+        if (rows !in 12..48 || width.toLong() * (bottom - top) > 2_000_000) return null
+        if (decoder == null && width.toLong() * height > 2_000_000) return null
+        val band = if (decoder != null) {
+            requireNotNull(decoder.decodeRegion(Rect(0, top, width, bottom), BitmapFactory.Options()))
+        } else {
+            val full = fallback ?: requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size)).also { fallback = it }
+            Bitmap.createBitmap(full, 0, top, width, bottom - top)
+        }
+        var scaled: Bitmap? = null
+        try {
+            val small = Bitmap.createScaledBitmap(band, 192, rows, true).also { scaled = it }
+            val pixels = IntArray(192 * rows)
+            small.getPixels(pixels, 0, 192, 0, 0, 192, rows)
+            return ReaderImageSignature(pixels, 192)
+        } finally {
+            if (scaled !== band) scaled?.recycle()
+            if (band !== fallback) band.recycle()
+        }
+    }
+
     fun contrastEdges(): List<Float> {
         if (height > 100_000) return emptyList()
         val columns = minOf(width, 64)

@@ -45,7 +45,7 @@ object ReaderImageRules {
 
     private lateinit var directory: File
     private lateinit var checkedStore: ReaderCheckedStore
-    internal val matcherVersion = "legacy48-strip64-v2-complete|${Build.FINGERPRINT}"
+    internal val matcherVersion = "legacy48-strip64-v3-thin192-v1|${Build.FINGERPRINT}"
     private data class CheckedSnapshot(
         val revision: Long,
         val rules: List<JSONObject>,
@@ -390,7 +390,10 @@ object ReaderImageRules {
             val disk = checkedStore.read(
                 ReaderCheckedStore.Key(digest, snapshot.corpus, matcherVersion),
                 snapshot.proofs,
-            )
+            ) ?: retainPreviousPositive(checkedStore.read(
+                ReaderCheckedStore.Key(digest, snapshot.corpus, "legacy48-strip64-v2-complete|${Build.FINGERPRINT}"),
+                snapshot.proofs,
+            ))
             synchronized(this) {
                 if (snapshot.revision == revision.value) {
                     if (disk != null) {
@@ -541,6 +544,23 @@ object ReaderImageRules {
         sample
     }.getOrNull()
 
+    private fun detailedSample(candidate: JSONObject): ReaderImageSignature? {
+        val key = "thin192:" + candidate.toString()
+        synchronized(this) { signatures[key]?.let { return it } }
+        val sample = ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
+            it.detailedSignature(candidate.getInt("removeTop"), candidate.getInt("removeBottom"))
+        } ?: return null
+        synchronized(this) {
+            if (rules()[candidate.getString("sha256")]?.toString() == candidate.toString()) {
+                signatures[key] = sample
+                while (signatures.values.sumOf { it.pixels.size.toLong() * 4 } > 16L * 1024 * 1024) {
+                    signatures.remove(signatures.keys.first())
+                }
+            }
+        }
+        return sample
+    }
+
     private data class BandEvaluation(val matches: List<JSONObject>, val complete: Boolean)
 
     private fun matchingBands(
@@ -579,6 +599,31 @@ object ReaderImageRules {
         val edges by lazy { image.contrastEdges().map { (it * image.height).roundToInt() } }
         for (candidate in candidates.filter { !it.has("watermark") }) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
+            val bandHeight = candidate.getInt("removeBottom") - candidate.getInt("removeTop")
+            val normalizedHeight = (bandHeight * 48f / candidate.getInt("width")).roundToInt()
+            val anchor = candidate.optString("maskAnchor")
+            val whole = candidate.optBoolean("hide")
+            if (normalizedHeight in 3..11 && (whole || anchor in setOf("top", "bottom"))) {
+                // This class cannot pass the legacy12-row minimum. Increase evidence resolution,
+                // not error tolerance, and never search arbitrary interior artwork for a thin band.
+                val detailed = detailedSample(candidate) ?: continue
+                val scaledHeight = (bandHeight * image.width.toFloat() / candidate.getInt("width")).roundToInt()
+                if (whole && scaledHeight != image.height) continue
+                val start = if (whole || anchor == "top") 0 else image.height - scaledHeight
+                val end = start + scaledHeight
+                if (start < 0 || end > image.height || start >= end) continue
+                val targetBand = image.detailedSignature(start, end, detailed.height) ?: continue
+                if (!targetBand.agrees(detailed, 0, 0, detailed.height)) continue
+                val normalizedRows = (image.height * 192f / image.width).roundToInt().coerceAtLeast(1)
+                val top = ReaderImageSignature.refineBoundary(start, image.height, normalizedRows, edges) ?: continue
+                val bottom = ReaderImageSignature.refineBoundary(end, image.height, normalizedRows, edges) ?: continue
+                if (top >= bottom) continue
+                matches += JSONObject(candidate.toString()).apply {
+                    put("removeTop", top)
+                    put("removeBottom", bottom)
+                }
+                continue
+            }
             val sample = sampleSignature(candidate)
             if (sample == null) {
                 complete = false

@@ -43,7 +43,7 @@ internal class ReaderImageSignature(val pixels: IntArray, val width: Int = 48) {
 
     /** Require texture and agreement across the complete proposed removal, including its edges. */
     fun agrees(other: ReaderImageSignature, start: Int, otherStart: Int, rows: Int): Boolean {
-        if (rows < 12 || start < 0 || otherStart < 0 || start + rows > height || otherStart + rows > other.height) {
+        if (width != other.width || rows < 12 || start < 0 || otherStart < 0 || start + rows > height || otherStart + rows > other.height) {
             return false
         }
         var error = 0L
