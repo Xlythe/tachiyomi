@@ -571,6 +571,8 @@ object ReaderImageRules {
         val matches = mutableListOf<JSONObject>()
         var complete = true
         if (exact != null) matches += JSONObject(exact.toString())
+        // An explicit whole-page hide already covers every pixel; other templates cannot add a removal.
+        if (exact?.optBoolean("hide") == true) return BandEvaluation(matches, complete = true)
         val partialRules = candidates.filter { it.has("maskPixelSha256") }
         val hashes = mutableMapOf<Pair<Int, Int>, String>()
         for (candidate in partialRules) {
