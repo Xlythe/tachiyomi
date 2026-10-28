@@ -13,6 +13,7 @@ internal class ReaderDownloadSchedule(private val limit: Int = 128) {
         var retryAt: Long = 0,
     )
     private val entries = LinkedHashMap<String, Entry>()
+    private var protectedUri: String? = null
     init { require(limit in 1..128) }
 
     fun snapshot(): List<Entry> = entries.values.map { it.copy() }
@@ -26,7 +27,7 @@ internal class ReaderDownloadSchedule(private val limit: Int = 128) {
     fun committed(uri: String, directory: Boolean, generation: String) {
         entries.remove(uri)
         entries[uri] = Entry(uri, directory, generation)
-        while (entries.size > limit) entries.remove(entries.keys.first())
+        while (entries.size > limit) entries.remove(entries.keys.first { it != protectedUri })
     }
 
     /** Existing metadata discovery fills free slots; repeated inventory passes never churn the bounded history. */
@@ -34,6 +35,24 @@ internal class ReaderDownloadSchedule(private val limit: Int = 128) {
         if (uri in entries || entries.size == limit) return false
         entries[uri] = Entry(uri, directory, generation)
         return true
+    }
+
+    /** One traversal ticket survives normal history eviction until acknowledged or superseded. */
+    fun traversalTicket(uri: String, directory: Boolean, generation: String): Entry {
+        protectedUri = uri
+        if (uri !in entries) committed(uri, directory, generation)
+        return entries.getValue(uri).copy()
+    }
+    fun forget(uri: String) { entries.remove(uri); if (protectedUri == uri) protectedUri = null }
+    fun releaseTraversalTicket(uri: String) { if (protectedUri == uri) protectedUri = null }
+    enum class Progress { WAITING, COMPLETE, FAILED, SUPERSEDED }
+    fun progress(ticket: Entry, version: String): Progress {
+        val current = entries[ticket.uri]?.takeIf { it.generation == ticket.generation } ?: return Progress.SUPERSEDED
+        return when {
+            current.checkedVersion == version -> Progress.COMPLETE
+            current.rulesVersion == version && current.failures > 0 -> Progress.FAILED
+            else -> Progress.WAITING
+        }
     }
 
     fun next(version: String, now: Long): Entry? {
@@ -64,9 +83,12 @@ internal class ReaderDownloadSchedule(private val limit: Int = 128) {
     }
     fun failed(item: Entry, now: Long) {
         if (!current(item)) return
-        entries.getValue(item.uri).apply {
+        val current = entries.getValue(item.uri).apply {
             failures = (failures + 1).coerceAtMost(10)
             retryAt = now + minOf(600_000L, 5_000L * (1L shl failures))
         }
+        // An expired backoff must not repeatedly starve later chapters with long-running failures.
+        entries.remove(item.uri)
+        entries[item.uri] = current
     }
 }

@@ -68,11 +68,13 @@ internal object ReaderDownloadPrechecks {
             // Preserve malformed/unsupported state for diagnosis; do not overwrite it with an empty history.
             indexHealthy = false
         }
+        ReaderDownloadIndexPrechecks.initialize(context)
         // Conflate bursts of edits off the UI thread. Work checks the actual current version per page.
         scope.launch {
             ReaderImageRules.revision.collectLatest {
                 delay(250)
                 synchronized(gate) { wake.trySend(Unit); startLocked() }
+                ReaderDownloadIndexPrechecks.rulesChanged()
             }
         }
         startLocked()
@@ -100,6 +102,26 @@ internal object ReaderDownloadPrechecks {
             startLocked()
         }
     }
+
+    /** Forget only scheduling metadata for a removed chapter; original bytes/rules/decisions are untouched. */
+    fun forget(uri: Uri) = synchronized(gate) {
+        schedule.forget(uri.toString())
+        persistLocked()
+        wake.trySend(Unit)
+    }
+
+    fun traversalTicket(uri: Uri, directory: Boolean): ReaderDownloadSchedule.Entry = synchronized(gate) {
+        require(validUri(uri.toString()))
+        val ticket = schedule.traversalTicket(uri.toString(), directory, UUID.randomUUID().toString())
+        persistLocked()
+        wake.trySend(Unit)
+        startLocked()
+        ticket
+    }
+    fun traversalProgress(ticket: ReaderDownloadSchedule.Entry, version: String) = synchronized(gate) {
+        schedule.progress(ticket, version)
+    }
+    fun releaseTraversalTicket(uri: String) = synchronized(gate) { schedule.releaseTraversalTicket(uri) }
 
     private fun persistLocked() = runCatching {
         if (!indexHealthy) return@runCatching
@@ -172,9 +194,10 @@ internal object ReaderDownloadPrechecks {
         val version = item.rulesVersion
         val cursor = item.cursor
         val root = UniFile.fromUri(context, Uri.parse(item.uri)) ?: return false
+        var incomplete = false
         if (item.directory) {
             val listed = root.listFiles() ?: return false
-            if (listed.any { it.name.orEmpty().endsWith(".tmp", true) }) return false
+            incomplete = listed.any { it.name.orEmpty().endsWith(".tmp", true) }
             val files = listed.filter { !it.isDirectory && eligible(it.name.orEmpty()) }.sortedBy { it.name }
             if (files.isEmpty() || files.size > 10000 || cursor > files.size) return false
             for (i in cursor until files.size) {
@@ -192,8 +215,8 @@ internal object ReaderDownloadPrechecks {
                 ZipFile(File("/proc/self/fd/${fd.fd}")).use { zip ->
                     val entries = zip.entries().asSequence().take(10001).toList()
                     if (entries.size > 10000 || cursor > entries.size ||
-                        entries.any { it.name.endsWith(".tmp", true) } ||
                         entries.none { !it.isDirectory && eligible(it.name) }) return false
+                    incomplete = entries.any { it.name.endsWith(".tmp", true) }
                     for (i in cursor until entries.size) {
                         if (!stillQueued(item) || ReaderImageRules.precheckVersion() != version) return false
                         val entry = entries[i]
@@ -207,6 +230,11 @@ internal object ReaderDownloadPrechecks {
                     }
                 }
             }
+        }
+        if (incomplete) {
+            // Check finalized siblings but never certify a partial chapter; retry from the first entry.
+            advance(item, 0)
+            return false
         }
         return ReaderImageRules.precheckVersion() == version
     }

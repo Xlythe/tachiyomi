@@ -6,6 +6,9 @@ import android.net.Uri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.Source
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadIndexPage
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadIndexPrechecks
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadTraversal
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadPrechecks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +55,7 @@ import tachiyomi.domain.storage.service.StorageManager
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
 
@@ -311,6 +315,8 @@ class DownloadCache(
         }
 
         renewalJob = scope.launchIO {
+            ReaderDownloadIndexPrechecks.indexUnavailable()
+            val inventoryReady = AtomicBoolean(true)
             if (lastRenew == 0L) {
                 _isInitializing.emit(true)
             }
@@ -334,7 +340,9 @@ class DownloadCache(
             rootDownloadsDirLock.withLock {
                 rootDownloadsDir = RootDirectory(storageManager.getDownloadsDirectory())
 
-                val sourceDirs = rootDownloadsDir.dir?.listFiles().orEmpty()
+                val sourceFiles = rootDownloadsDir.dir?.listFiles()
+                if (sourceFiles == null) inventoryReady.set(false)
+                val sourceDirs = sourceFiles.orEmpty()
                     .filter { it.isDirectory && !it.name.isNullOrBlank() }
                     .flatMap { dir ->
                         sourceMap[dir.name!!.lowercase()]
@@ -348,12 +356,16 @@ class DownloadCache(
                 sourceDirs.values
                     .map { sourceDir ->
                         async {
-                            sourceDir.mangaDirs = sourceDir.dir?.listFiles().orEmpty()
+                            val mangaFiles = sourceDir.dir?.listFiles()
+                            if (mangaFiles == null) inventoryReady.set(false)
+                            sourceDir.mangaDirs = mangaFiles.orEmpty()
                                 .filter { it.isDirectory && !it.name.isNullOrBlank() }
                                 .associate { it.name!! to MangaDirectory(it) }
 
                             sourceDir.mangaDirs.values.forEach { mangaDir ->
-                                val chapterDirs = mangaDir.dir?.listFiles().orEmpty()
+                                val chapterFiles = mangaDir.dir?.listFiles()
+                                if (chapterFiles == null) inventoryReady.set(false)
+                                val chapterDirs = chapterFiles.orEmpty()
                                     .mapNotNull {
                                         when {
                                             // Ignore incomplete downloads
@@ -381,6 +393,11 @@ class DownloadCache(
                     .awaitAll()
             }
 
+            if (extensionManager.isInitialized && inventoryReady.get()) {
+                rootDownloadsDir.dir?.uri?.toString()?.let { root ->
+                    ReaderDownloadIndexPrechecks.installIndex(root, ::precheckIndexPage)
+                }
+            }
             _isInitializing.emit(false)
         }.also {
             it.invokeOnCompletion(onCancelling = true) { exception ->
@@ -394,6 +411,24 @@ class DownloadCache(
 
         // Mainly to notify the indexing notifier UI
         notifyChanges()
+    }
+
+    /** Stable hierarchical cursor, not an ordinal offset. No filesystem or image reads here. */
+    private suspend fun precheckIndexPage(
+        after: ReaderDownloadTraversal.Key?,
+        limit: Int,
+    ): List<ReaderDownloadTraversal.Chapter> = rootDownloadsDirLock.withLock {
+        ReaderDownloadIndexPage.page(
+            rootDownloadsDir.sourceDirs.keys,
+            mangas = { rootDownloadsDir.sourceDirs.getValue(it).mangaDirs.keys },
+            uri = { source, manga -> rootDownloadsDir.sourceDirs.getValue(source).mangaDirs.getValue(manga).dir?.uri?.toString() },
+            chapters = { source, name ->
+                val manga = rootDownloadsDir.sourceDirs.getValue(source).mangaDirs.getValue(name)
+                (manga.chapterDirs as? java.util.NavigableSet<String>)
+                    ?: java.util.TreeSet(manga.chapterDirs).also { manga.chapterDirs = it }
+            },
+            after, limit,
+        )
     }
 
     private fun getSources(): List<Source> {

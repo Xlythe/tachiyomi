@@ -60,8 +60,11 @@ class ReaderCheckedIntegrationTest {
         }.getOrDefault(false)
     }
     private fun queued(uri: Uri): Boolean = runCatching {
-        val list = JSONObject(File(context.filesDir, "reader-download-prechecks-v1.json").readText()).getJSONArray("jobs")
-        (0 until list.length()).any { list.getJSONObject(it).getString("uri") == uri.toString() }
+        val list = JSONObject(File(context.filesDir, "reader-download-prechecks-v2.json").readText()).getJSONArray("jobs")
+        (0 until list.length()).any {
+            val row = list.getJSONObject(it)
+            row.getString("uri") == uri.toString() && row.optString("checkedVersion") != ReaderImageRules.precheckVersion()
+        }
     }.getOrDefault(false)
     private fun await(label: String, predicate: () -> Boolean) {
         val end = SystemClock.elapsedRealtime() + 15_000
@@ -97,7 +100,10 @@ class ReaderCheckedIntegrationTest {
         File(folder, "001.png").writeBytes(completed)
         File(folder, "002.png.tmp").writeBytes(partial)
         ReaderDownloadPrechecks.enqueue(Uri.fromFile(folder), true)
-        await("Directory precheck must finish") { !queued(Uri.fromFile(folder)) }
+        await("Finalized directory page must be checked despite a partial sibling") {
+            stored(ReaderImageRules.hash(completed))
+        }
+        assertTrue("A partial chapter must stay pending, not certified clean", queued(Uri.fromFile(folder)))
         assertTrue(stored(ReaderImageRules.hash(completed)))
         assertFalse(stored(ReaderImageRules.hash(partial)))
         firstDisplayHides(completed)
@@ -118,7 +124,10 @@ class ReaderCheckedIntegrationTest {
         }
         val before = archive.readBytes()
         ReaderDownloadPrechecks.enqueue(Uri.fromFile(archive), false)
-        await("CBZ precheck must finish") { !queued(Uri.fromFile(archive)) }
+        await("Finalized CBZ page must be checked despite a partial sibling") {
+            stored(ReaderImageRules.hash(zipped))
+        }
+        assertTrue("A partial archive must stay pending, not certified clean", queued(Uri.fromFile(archive)))
         assertTrue(stored(ReaderImageRules.hash(zipped)))
         assertFalse(stored(ReaderImageRules.hash(zippedPartial)))
         firstDisplayHides(zipped)
@@ -190,7 +199,7 @@ class ReaderCheckedIntegrationTest {
         ReaderDownloadPrechecks.enqueue(uri, true)
         await("First job must checkpoint its first page") {
             runCatching {
-                val rows = JSONObject(File(context.filesDir, "reader-download-prechecks-v1.json").readText()).getJSONArray("jobs")
+                val rows = JSONObject(File(context.filesDir, "reader-download-prechecks-v2.json").readText()).getJSONArray("jobs")
                 (0 until rows.length()).any {
                     val row = rows.getJSONObject(it); row.getString("uri") == uri.toString() && row.getInt("cursor") == 1
                 }

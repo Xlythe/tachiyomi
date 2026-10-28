@@ -52,7 +52,14 @@ class ReaderDownloadScheduleTest {
         val good = q.next("v1", 1)!!; assertEquals("good", good.uri); q.complete(good, "v1")
         assertNull(q.next("v1", 2)); assertTrue(q.hasPending("v1"))
         assertEquals("bad", q.next("v1", 10_000)!!.uri)
-        assertEquals("bad", q.next("v2", 2)!!.uri)
+        // Fair rotation puts the previously successful chapter first in the new version too.
+        val firstUpdated = q.next("v2", 2)!!
+        assertEquals("good", firstUpdated.uri)
+        q.complete(firstUpdated, "v2")
+        val failedUpdated = q.next("v2", 2)!!
+        assertEquals("bad", failedUpdated.uri)
+        assertEquals(0, failedUpdated.failures)
+        assertEquals(0, failedUpdated.retryAt)
     }
     @Test fun metadataAndDiscoveryAreBoundedWithoutRepeatedInventoryChurn() {
         val q = ReaderDownloadSchedule(2)
