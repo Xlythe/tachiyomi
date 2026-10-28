@@ -151,8 +151,11 @@ internal object ReaderDownloadPrechecks {
                 synchronized(gate) {
                     worker = null
                     persistLocked()
-                    // An enqueue can arrive between the final empty check and this finalizer.
-                    if (finishedNormally && schedule.hasPending(lastVersion)) startLocked()
+                    // Preserve a rule-change/commit wake arriving after the final empty check.
+                    // Comparing only lastVersion would lose a new rule when every old job was complete.
+                    if (finishedNormally &&
+                        (schedule.hasPending(lastVersion) || wake.tryReceive().isSuccess)
+                    ) startLocked()
                 }
             }
         }
