@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.widget.FrameLayout
 import androidx.core.view.isVisible
+import androidx.core.view.doOnLayout
 import androidx.core.view.updateLayoutParams
 import androidx.core.view.updateMargins
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
@@ -98,6 +99,7 @@ class WebtoonPageHolder(
         loadJob?.cancel()
         frame.recycle()
         this.page = page
+        page.invalidateWebtoonImage()
         refreshLayoutParams()
         val token = geometry.bind(page.displayDimensions)
         if (page.isHidden) showHidden(token)
@@ -105,6 +107,7 @@ class WebtoonPageHolder(
     }
 
     fun onImageRuleApplied() {
+        page?.invalidateWebtoonImage()
         loadJob?.cancel()
         if (page?.isHidden == true) showHidden(geometry.begin()) else geometry.pending()
         loadJob = scope.launch { loadPageAndProcessStatus() }
@@ -116,6 +119,19 @@ class WebtoonPageHolder(
         progressContainer.isVisible = false
         removeErrorLayout()
         geometry.hide(token)
+        publishVisibleContent(token, ReaderImageRules.revision.value)
+    }
+
+    private fun publishVisibleContent(token: Long, revision: Long) {
+        val bound = page ?: return
+        frame.doOnLayout {
+            if (geometry.isCurrent(token) && page === bound && revision == ReaderImageRules.revision.value) {
+                bound.markWebtoonImageReady(revision)
+                viewer.recycler.post {
+                    if (geometry.isCurrent(token) && page === bound) viewer.onScrolled()
+                }
+            }
+        }
     }
 
     private fun refreshLayoutParams() {
@@ -206,6 +222,8 @@ class WebtoonPageHolder(
         progressIndicator.setProgress(0)
         val page = page ?: return
         val token = geometry.begin()
+        val imageRevision = ReaderImageRules.revision.value
+        page.invalidateWebtoonImage()
         if (page.isHidden) {
             showHidden(token)
             return
@@ -260,6 +278,7 @@ class WebtoonPageHolder(
                         frame.imageDimensions()?.let { (width, height) ->
                             page.displayDimensions = width to height
                             geometry.loaded(token, width, height)
+                            publishVisibleContent(token, imageRevision)
                         }
                         onImageDecoded()
                     }
@@ -320,6 +339,7 @@ class WebtoonPageHolder(
      * Called when the page has an error.
      */
     private fun setError() {
+        page?.invalidateWebtoonImage()
         progressContainer.isVisible = false
         initErrorLayout()
     }

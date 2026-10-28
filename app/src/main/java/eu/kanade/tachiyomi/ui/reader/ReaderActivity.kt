@@ -660,8 +660,8 @@ class ReaderActivity : BaseActivity() {
      * Called from the viewer whenever a [page] is marked as active. It updates the values of the
      * bottom menu and delegates the change to the presenter.
      */
-    fun onPageSelected(page: ReaderPage) {
-        viewModel.onPageSelected(page)
+    fun onPageSelected(page: ReaderPage, allowCompletion: Boolean = true) {
+        viewModel.onPageSelected(page, allowCompletion)
     }
 
     /**

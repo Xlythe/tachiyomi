@@ -26,6 +26,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
@@ -420,7 +421,7 @@ class ReaderViewModel @JvmOverloads constructor(
      * read, update tracking services, enqueue downloaded chapter deletion, and updating the active chapter if this
      * [page]'s chapter is different from the currently active.
      */
-    fun onPageSelected(page: ReaderPage) {
+    fun onPageSelected(page: ReaderPage, allowCompletion: Boolean = true) {
         // InsertPage doesn't change page progress
         if (page is InsertPage) {
             return
@@ -431,7 +432,7 @@ class ReaderViewModel @JvmOverloads constructor(
 
         // Save last page read and mark as read if needed
         viewModelScope.launchNonCancellable {
-            updateChapterProgress(selectedChapter, page)
+            updateChapterProgress(selectedChapter, page, allowCompletion)
         }
 
         if (selectedChapter != getCurrentChapter()) {
@@ -445,6 +446,32 @@ class ReaderViewModel @JvmOverloads constructor(
         }
 
         eventChannel.trySend(Event.PageChanged)
+    }
+
+    /** A rendered chapter end may be followed by a transition or zero-height spam pages. */
+    fun onVisibleChapterEnd(readerChapter: ReaderChapter, endVisibleIndex: Int) {
+        val pages = readerChapter.pages?.filterNot { it is InsertPage } ?: return
+        val snapshot = pages.map {
+            ReaderChapterCompletion.Page(it.index, it.isHidden,
+                it.status == Page.State.READY && it.isWebtoonImageReady)
+        }
+        val terminal = ReaderChapterCompletion.terminalIndex(snapshot) ?: return
+        if (endVisibleIndex < terminal) return
+        val revision = ReaderImageRules.revision.value
+        viewModelScope.launchNonCancellable {
+            if (revision != ReaderImageRules.revision.value) return@launchNonCancellable
+            if (incognitoMode || readerChapter.chapter.read) return@launchNonCancellable
+            // Keep original indexes; hidden trailing pages do not manufacture a new selected page.
+            readerChapter.chapter.last_page_read = maxOf(readerChapter.chapter.last_page_read, terminal)
+            readerChapter.chapter.read = true
+            updateTrackChapterRead(readerChapter)
+            deleteChapterIfNeeded(readerChapter)
+            updateChapter.await(ChapterUpdate(
+                id = readerChapter.chapter.id!!.toLong(),
+                read = true,
+                lastPageRead = readerChapter.chapter.last_page_read.toLong(),
+            ))
+        }
     }
 
     private fun downloadNextChapters() {
@@ -514,7 +541,7 @@ class ReaderViewModel @JvmOverloads constructor(
      * Saves the chapter progress (last read page and whether it's read)
      * if incognito mode isn't on.
      */
-    private suspend fun updateChapterProgress(readerChapter: ReaderChapter, page: Page) {
+    private suspend fun updateChapterProgress(readerChapter: ReaderChapter, page: Page, allowCompletion: Boolean) {
         val pageIndex = page.index
 
         mutableState.update {
@@ -526,7 +553,7 @@ class ReaderViewModel @JvmOverloads constructor(
         if (!incognitoMode && page.status != Page.State.ERROR) {
             readerChapter.chapter.last_page_read = pageIndex
 
-            if (readerChapter.pages?.lastIndex == pageIndex) {
+            if (allowCompletion && readerChapter.pages?.lastIndex == pageIndex) {
                 readerChapter.chapter.read = true
                 updateTrackChapterRead(readerChapter)
                 deleteChapterIfNeeded(readerChapter)

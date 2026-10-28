@@ -31,6 +31,7 @@ open class ReaderPage(
             displayDimensions = null
             hidden = false
             matchedRevision = -1L
+            webtoonReadyRevision = -1L
         }
 
     /** Last displayed aspect ratio, not an image copy. Headers fill this before slow filtering. */
@@ -49,6 +50,13 @@ open class ReaderPage(
     @Volatile
     private var hidden = false
     val isHidden: Boolean get() = hidden && matchedRevision == ReaderImageRules.revision.value
+
+    @Volatile private var webtoonReadyRevision = -1L
+    internal val isWebtoonImageReady get() = webtoonReadyRevision == ReaderImageRules.revision.value
+    internal fun invalidateWebtoonImage() { webtoonReadyRevision = -1L }
+    internal fun markWebtoonImageReady(revision: Long) {
+        if (revision == ReaderImageRules.revision.value) webtoonReadyRevision = revision
+    }
 
     open lateinit var chapter: ReaderChapter
 }
