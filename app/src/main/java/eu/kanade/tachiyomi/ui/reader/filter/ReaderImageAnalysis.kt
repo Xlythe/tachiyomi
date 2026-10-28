@@ -90,6 +90,10 @@ internal class ReaderImageSignature(val pixels: IntArray, val width: Int = 48) {
     }
 
     companion object {
+        /** Keep refined removal inside the pixels whose match was actually verified. */
+        fun verifiedRemoval(top: Int, bottom: Int, verifiedTop: Int, verifiedBottom: Int): Boolean =
+            verifiedTop >= 0 && verifiedTop <= top && top < bottom && bottom <= verifiedBottom
+
         fun refineBoundary(value: Int, height: Int, normalizedRows: Int, edges: List<Int>): Int? {
             if (value == 0 || value == height) return value
             val tolerance = height.toFloat() / normalizedRows * 0.75f

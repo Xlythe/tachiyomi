@@ -28,4 +28,14 @@ class ReaderDetailedSignatureTest {
         for (i in 0 until 192 * 3) different[i] = 0xffff0000.toInt()
         assertFalse(detailed.agrees(ReaderImageSignature(different, 192), 0, 0, 32))
     }
+    @Test fun refinementCannotRemoveUncomparedStoryAboveOrBelowTheMatchedBand() {
+        assertFalse(ReaderImageSignature.verifiedRemoval(99, 200, 100, 200))
+        assertFalse(ReaderImageSignature.verifiedRemoval(100, 201, 100, 200))
+        assertTrue(ReaderImageSignature.verifiedRemoval(101, 199, 100, 200))
+        assertTrue(ReaderImageSignature.verifiedRemoval(100, 200, 100, 200))
+    }
+    @Test fun verifiedRemovalStillRejectsEmptyOrInvertedCuts() {
+        assertFalse(ReaderImageSignature.verifiedRemoval(100, 100, 100, 200))
+        assertFalse(ReaderImageSignature.verifiedRemoval(150, 149, 100, 200))
+    }
 }

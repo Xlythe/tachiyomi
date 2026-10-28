@@ -617,7 +617,7 @@ object ReaderImageRules {
                 val normalizedRows = (image.height * 192f / image.width).roundToInt().coerceAtLeast(1)
                 val top = ReaderImageSignature.refineBoundary(start, image.height, normalizedRows, edges) ?: continue
                 val bottom = ReaderImageSignature.refineBoundary(end, image.height, normalizedRows, edges) ?: continue
-                if (top >= bottom) continue
+                if (!ReaderImageSignature.verifiedRemoval(top, bottom, start, end)) continue
                 matches += JSONObject(candidate.toString()).apply {
                     put("removeTop", top)
                     put("removeBottom", bottom)
