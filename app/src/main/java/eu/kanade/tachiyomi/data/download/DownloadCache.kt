@@ -6,6 +6,7 @@ import android.net.Uri
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.Source
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadPrechecks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -358,9 +359,15 @@ class DownloadCache(
                                             // Ignore incomplete downloads
                                             it.name?.endsWith(Downloader.TMP_DIR_SUFFIX) == true -> null
                                             // Folder of images
-                                            it.isDirectory -> it.name
+                                            it.isDirectory -> {
+                                                ReaderDownloadPrechecks.rememberExisting(it.uri, true)
+                                                it.name
+                                            }
                                             // CBZ files
-                                            it.isFile && it.extension == "cbz" -> it.nameWithoutExtension
+                                            it.isFile && it.extension == "cbz" -> {
+                                                ReaderDownloadPrechecks.rememberExisting(it.uri, false)
+                                                it.nameWithoutExtension
+                                            }
                                             // Anything else is irrelevant
                                             else -> null
                                         }
