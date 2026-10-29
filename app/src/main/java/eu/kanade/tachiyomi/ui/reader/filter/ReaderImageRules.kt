@@ -45,7 +45,12 @@ object ReaderImageRules {
 
     private lateinit var directory: File
     private lateinit var checkedStore: ReaderCheckedStore
-    internal val matcherVersion = "legacy48-strip64-v3-thin192-v1|${Build.FINGERPRINT}"
+    // A lazy template-evidence tier complements the completed-image cache; never eagerly prepare
+    // samples on startup/import/save, and never wait for this disk writer on the display path.
+    private lateinit var fingerprints: ReaderRuleFingerprintCache
+    private data class WholePixels(val probe: Int, val probeHash: String, val pixelsHash: String)
+    private val wholePixelEvidenceCache = LinkedHashMap<String, WholePixels>(128, 0.75f, true)
+    internal val matcherVersion = "legacy48-strip64-v4-exactwhole-thin192-v1|${Build.FINGERPRINT}"
     private data class CheckedSnapshot(
         val revision: Long,
         val rules: List<JSONObject>,
@@ -80,6 +85,7 @@ object ReaderImageRules {
         if (::directory.isInitialized && directory == target) return
         directory = target.apply { mkdirs() }
         checkedStore = ReaderCheckedStore(File(context.filesDir, "reader-checked-v1"))
+        fingerprints = ReaderRuleFingerprintCache(File(context.filesDir, "reader-rule-fingerprints-lazy-v1"), 16L * 1024 * 1024)
         ReaderDownloadPrechecks.initialize(context.applicationContext)
     }
     private val index get() = AtomicFile(File(directory, "rules.json"))
@@ -390,10 +396,11 @@ object ReaderImageRules {
             val disk = checkedStore.read(
                 ReaderCheckedStore.Key(digest, snapshot.corpus, matcherVersion),
                 snapshot.proofs,
-            ) ?: retainPreviousPositive(checkedStore.read(
-                ReaderCheckedStore.Key(digest, snapshot.corpus, "legacy48-strip64-v2-complete|${Build.FINGERPRINT}"),
-                snapshot.proofs,
-            ))
+            ) ?: listOf("legacy48-strip64-v3-thin192-v1", "legacy48-strip64-v2-complete").firstNotNullOfOrNull { old ->
+                retainPreviousPositive(checkedStore.read(
+                    ReaderCheckedStore.Key(digest, snapshot.corpus, "$old|${Build.FINGERPRINT}"), snapshot.proofs,
+                ))
+            }
             synchronized(this) {
                 if (snapshot.revision == revision.value) {
                     if (disk != null) {
@@ -530,7 +537,7 @@ object ReaderImageRules {
     private fun sampleSignature(candidate: JSONObject): ReaderImageSignature? = runCatching {
         val key = candidate.toString()
         synchronized(this) { signatures[key]?.let { return@runCatching it } }
-        val sample = ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
+        val sample = fingerprints.read(candidate)?.signature ?: ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
             it.signature(candidate.getInt("removeTop"), candidate.getInt("removeBottom"))
         }
         synchronized(this) {
@@ -542,6 +549,22 @@ object ReaderImageRules {
             }
         }
         sample
+    }.getOrNull()
+
+    private fun wholePixelEvidence(candidate: JSONObject): WholePixels? = runCatching {
+        val key = fingerprints.key(candidate)
+        synchronized(this) { wholePixelEvidenceCache[key]?.let { return it } }
+        val entry = fingerprints.prepare(candidate, original(candidate.getString("sha256")).readBytes())
+        val result = WholePixels(entry.probe, entry.probeHash, entry.pixelsHash)
+        // Prune only this derived cache, outside the rules monitor and under its own writer lock.
+        fingerprints.prune(snapshot().filterNot { it.has("watermark") }.map(fingerprints::key).toSet())
+        synchronized(this) {
+            if (rules()[candidate.getString("sha256")]?.toString() == candidate.toString()) {
+                wholePixelEvidenceCache[key] = result
+                while (wholePixelEvidenceCache.size > 128) wholePixelEvidenceCache.remove(wholePixelEvidenceCache.keys.first())
+            }
+        }
+        result
     }.getOrNull()
 
     private fun detailedSample(candidate: JSONObject): ReaderImageSignature? {
@@ -573,27 +596,31 @@ object ReaderImageRules {
         if (exact != null) matches += JSONObject(exact.toString())
         // An explicit whole-page hide already covers every pixel; other templates cannot add a removal.
         if (exact?.optBoolean("hide") == true) return BandEvaluation(matches, complete = true)
-        val partialRules = candidates.filter { it.has("maskPixelSha256") }
+        val exactRules = candidates.filter { !it.has("watermark") && (it.has("maskPixelSha256") || it.optBoolean("hide")) }
         val hashes = mutableMapOf<Pair<Int, Int>, String>()
-        for (candidate in partialRules) {
+        for (candidate in exactRules) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
             if (candidate.getInt("width") != image.width) continue
             val bandHeight = candidate.getInt("removeBottom") - candidate.getInt("removeTop")
-            val start = when (candidate.getString("maskAnchor")) {
+            if (bandHeight > image.height) continue
+            val whole = candidate.optBoolean("hide")
+            val evidence = if (whole && !candidate.has("maskPixelSha256")) wholePixelEvidence(candidate) else null
+            if (whole && !candidate.has("maskPixelSha256") && evidence == null) { complete = false; continue }
+            val probeOffset = evidence?.probe ?: candidate.getInt("maskProbeOffset")
+            val probeExpected = evidence?.probeHash ?: candidate.getString("maskProbeSha256")
+            val pixelsExpected = evidence?.pixelsHash ?: candidate.getString("maskPixelSha256")
+            val starts = if (whole) listOf(0, image.height - bandHeight).distinct() else listOf(when (candidate.getString("maskAnchor")) {
                 "top" -> 0
                 "bottom" -> image.height - bandHeight
                 else -> candidate.getInt("removeTop")
-            }
-            val end = start + bandHeight
-            if (start < 0 || end > image.height) continue
-            val probe = start + candidate.getInt("maskProbeOffset")
-            val probeHash = hashes.getOrPut(probe to probe + 1) { image.hashBand(probe, probe + 1) }
-            if (probeHash != candidate.getString("maskProbeSha256")) continue
-            val fingerprint = hashes.getOrPut(start to end) { image.hashBand(start, end) }
-            if (fingerprint != candidate.getString("maskPixelSha256")) continue
-            matches += JSONObject(candidate.toString()).apply {
-                put("removeTop", start)
-                put("removeBottom", end)
+            })
+            for (start in starts) {
+                val end = start + bandHeight
+                if (start < 0 || end > image.height || probeOffset !in 0 until bandHeight) continue
+                val probe = start + probeOffset
+                if (hashes.getOrPut(probe to probe + 1) { image.hashBand(probe, probe + 1) } != probeExpected) continue
+                if (hashes.getOrPut(start to end) { image.hashBand(start, end) } != pixelsExpected) continue
+                matches += JSONObject(candidate.toString()).apply { put("removeTop", start); put("removeBottom", end) }
             }
         }
         // Old rules participate without migration: derive signatures from the preserved originals.

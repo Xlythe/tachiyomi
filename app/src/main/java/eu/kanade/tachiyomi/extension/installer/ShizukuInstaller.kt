@@ -111,7 +111,7 @@ class ShizukuInstaller(private val service: Service) : Installer(service) {
                 "newProcess",
                 Array<String>::class.java, // Command array
                 Array<String>::class.java, // Env array (nullable)
-                String::class.java // Directory (nullable)
+                String::class.java, // Directory (nullable)
             )
 
             // Make the method accessible

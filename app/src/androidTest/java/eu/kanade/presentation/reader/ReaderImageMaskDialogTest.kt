@@ -294,6 +294,33 @@ class ReaderImageMaskDialogTest {
     }
 
     @Test
+    fun applyingWholePagePublishesVisibilityOnUiBeforeDismissingEditor() {
+        val page = ReaderPage(0, stream = { bytes.inputStream() })
+        val events = java.util.concurrent.CopyOnWriteArrayList<String>()
+        compose.activity.setContent {
+            MaterialTheme {
+                ReaderImageMaskDialog(
+                    page,
+                    JSONObject(),
+                    onDismiss = { events += "dismiss" },
+                    onApplied = { events += "saved" },
+                    onRuleChanged = {
+                        page.applyRuleVisibility(it)
+                        events += "visibility:$it"
+                    },
+                )
+            }
+        }
+        compose.waitUntil(15_000) { compose.onAllNodesWithTag("reader_image_mask").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Apply").performClick()
+        compose.waitUntil(15_000) { events.size == 3 }
+        compose.runOnIdle {
+            assertEquals(listOf("visibility:true", "dismiss", "saved"), events)
+            assertTrue(page.isHidden)
+        }
+    }
+
+    @Test
     fun defaultMaskCoversWholeImageAndBothHandlesCanSelectTheMiddle() {
         val page = ReaderPage(0, stream = { bytes.inputStream() })
         compose.setContent {

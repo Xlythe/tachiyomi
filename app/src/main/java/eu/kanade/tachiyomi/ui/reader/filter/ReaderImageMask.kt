@@ -15,7 +15,21 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /** Decode strips so hashing a long banner does not require a full-page bitmap. */
-internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
+internal class ReaderImageMask(
+    private val bytes: ByteArray,
+    private val fullDecodePixelLimit: Int = 4_000_000,
+) : Closeable {
+    // Lossy WebP region boundaries affect decoded pixels. Only lossless PNG requests may
+    // share a larger decoded region; preserve the original strip boundaries for other formats.
+    private val cachePixelLimit = if (
+        bytes.size >= 8 && bytes.copyOfRange(0, 8).contentEquals(
+            byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+        )
+    ) {
+        fullDecodePixelLimit
+    } else {
+        0
+    }
     private val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it)
     }
@@ -26,12 +40,41 @@ internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
 
     @Suppress("DEPRECATION")
     private val decoder = runCatching { BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false) }.getOrNull()
+    internal val canDecodeRegions get() = decoder != null
     private var fallback: Bitmap? = null
+    private var cachedRegion: Bitmap? = null
+    private var cachedRegionTop = 0
 
     private fun strips(top: Int, bottom: Int, action: (Bitmap, Int) -> Unit) {
+        if (top >= bottom) return
+        // Region decoding can restart image decompression for every strip/probe. Reuse one
+        // bounded bitmap for small images; large pages retain the existing strip-only path.
+        if (fallback == null && width.toLong() * height <= cachePixelLimit) {
+            fallback = decoder?.decodeRegion(Rect(0, 0, width, height), BitmapFactory.Options())
+                ?: BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: error("Cannot decode image")
+        }
+        val cached = cachedRegion
+        if (
+            fallback == null && decoder != null && bottom - top >= 64 &&
+            width.toLong() * (bottom - top) <= cachePixelLimit &&
+            (cached == null || top < cachedRegionTop || bottom > cachedRegionTop + cached.height)
+        ) {
+            cached?.recycle()
+            cachedRegion = null
+            cachedRegion = decoder.decodeRegion(Rect(0, top, width, bottom), BitmapFactory.Options())
+                ?: error("Cannot decode image region")
+            cachedRegionTop = top
+        }
         for (row in top until bottom step 64) {
             val count = minOf(64, bottom - row)
-            val bitmap = if (decoder != null) {
+            val full = fallback
+            val region = cachedRegion
+            val bitmap = if (full != null) {
+                Bitmap.createBitmap(full, 0, row, width, count)
+            } else if (region != null && row >= cachedRegionTop && row + count <= cachedRegionTop + region.height) {
+                Bitmap.createBitmap(region, 0, row - cachedRegionTop, width, count)
+            } else if (decoder != null) {
                 decoder.decodeRegion(Rect(0, row, width, row + count), BitmapFactory.Options())
                     ?: error("Cannot decode image region")
             } else {
@@ -41,7 +84,9 @@ internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
                     ).also { fallback = it }
                 Bitmap.createBitmap(full, 0, row, width, count)
             }
-            try { action(bitmap, row) } finally { if (bitmap !== fallback) bitmap.recycle() }
+            try { action(bitmap, row) } finally {
+                if (bitmap !== fallback && bitmap !== cachedRegion) bitmap.recycle()
+            }
         }
     }
 
@@ -196,5 +241,6 @@ internal class ReaderImageMask(private val bytes: ByteArray) : Closeable {
     override fun close() {
         decoder?.recycle()
         fallback?.recycle()
+        cachedRegion?.recycle()
     }
 }
