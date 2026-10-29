@@ -26,6 +26,7 @@ dependencies {
     api(libs.sqldelight.android.paging)
 
     testImplementation(libs.bundles.test)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.1")
     testImplementation(kotlinx.coroutines.test)
 }
 
