@@ -2,6 +2,7 @@ package eu.kanade.presentation.reader
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.widget.Toast
 import android.graphics.Rect
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,6 +64,7 @@ import eu.kanade.tachiyomi.ui.reader.filter.ImagePoint
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageTransform
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderWatermarkEditor
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageMask
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderSpamReports
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageSnap
 import eu.kanade.tachiyomi.ui.reader.filter.prepareReaderEditor
@@ -328,6 +330,7 @@ private fun ReaderImageMaskDialogContent(
         error = null
         scope.launch {
             try {
+                var reportQueued = true
                 withContext(Dispatchers.IO) {
                     if (restore) {
                         ReaderImageRules.remove(existingHash ?: ReaderImageRules.hash(raw))
@@ -343,11 +346,13 @@ private fun ReaderImageMaskDialogContent(
                         // Exact whole-image hides stay immediate even if cancelled native preview work remains.
                         if (savedWatermark == null && start == 0 && end == height) save()
                         else watermarkPreviewMutex.withLock { save() }
+                        if (savedWatermark == null) reportQueued = ReaderSpamReports.enqueueExplicit(ReaderImageRules.hash(raw), metadata)
                     }
                 }
                 onRuleChanged(
                     !restore && savedWatermark == null && start == 0 && end == height,
                 )
+                if (!reportQueued) Toast.makeText(context, "Image rule saved; spam report could not be queued", Toast.LENGTH_LONG).show()
                 updateEditor(editor.close())
                 onDismiss()
                 if (!restore) onApplied(ReaderImageRules.hash(raw))

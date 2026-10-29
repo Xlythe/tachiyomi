@@ -87,6 +87,7 @@ object ReaderImageRules {
         checkedStore = ReaderCheckedStore(File(context.filesDir, "reader-checked-v1"))
         fingerprints = ReaderRuleFingerprintCache(File(context.filesDir, "reader-rule-fingerprints-lazy-v1"), 16L * 1024 * 1024)
         ReaderDownloadPrechecks.initialize(context.applicationContext)
+        ReaderSpamReports.initialize(context.applicationContext)
     }
     private val index get() = AtomicFile(File(directory, "rules.json"))
     private var loaded: MutableMap<String, JSONObject>? = null
