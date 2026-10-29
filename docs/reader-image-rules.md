@@ -207,3 +207,12 @@ Tailscale connectivity alone does not authorize or establish ADB. A compatible
 signed APK can instead be transferred privately and opened by the user in the
 Android installer. No transfer, pairing, security setting change, or installation
 is performed by this work.
+
+Reader display applies exact saved hides/crops/watermark edits immediately. New
+automatic comparisons run in one background worker; they cannot hold the display
+stream or the shared rules monitor while decoding. At most two pending samples
+(16 MiB combined) and 16 MiB of rendered results are kept. Samples above the queue
+limit remain visible and can still be marked manually. A new automatic match may
+appear after the original page is already visible. Rule/preparation revisions
+reject stale results after edits or restore, and current reader holders refresh
+through their existing binding guards. Original downloaded files are unchanged.

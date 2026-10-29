@@ -151,7 +151,12 @@ class WebtoonPageHolder(
             launchIO {
                 loader.loadPage(page)
             }
-            combine(page.statusFlow, ReaderImageRules.revision, ReaderImageRules.preparedRevision) { state, _, _ ->
+            combine(
+                page.statusFlow,
+                ReaderImageRules.revision,
+                ReaderImageRules.preparedRevision,
+                ReaderImageRules.automaticRevision,
+            ) { state, _, _, _ ->
                 state
             }.collectLatest { state ->
                 when (state) {
