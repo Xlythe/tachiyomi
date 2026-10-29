@@ -32,14 +32,16 @@ internal object SourceFilterState {
             when (filter) {
                 is Filter.Text -> filter.state = saved.value.orEmpty()
                 is Filter.CheckBox -> saved.value?.toBooleanStrictOrNull()?.let { filter.state = it }
-                is Filter.TriState -> saved.value
-                    ?.toIntOrNull()
-                    ?.takeIf { it in Filter.TriState.STATE_IGNORE..Filter.TriState.STATE_EXCLUDE }
-                    ?.let { filter.state = it }
-                is Filter.Select<*> -> saved.value
-                    ?.toIntOrNull()
-                    ?.takeIf { it in filter.values.indices }
-                    ?.let { filter.state = it }
+                is Filter.TriState ->
+                    saved.value
+                        ?.toIntOrNull()
+                        ?.takeIf { it in Filter.TriState.STATE_IGNORE..Filter.TriState.STATE_EXCLUDE }
+                        ?.let { filter.state = it }
+                is Filter.Select<*> ->
+                    saved.value
+                        ?.toIntOrNull()
+                        ?.takeIf { it in filter.values.indices }
+                        ?.let { filter.state = it }
                 is Filter.Sort -> {
                     filter.state = saved.value
                         ?.toIntOrNull()
@@ -57,9 +59,24 @@ internal object SourceFilterState {
             visitFilters { path, filter ->
                 val state = when (filter) {
                     is Filter.Text -> PersistedFilterState(path, filter.name, filter.typeName(), filter.state)
-                    is Filter.CheckBox -> PersistedFilterState(path, filter.name, filter.typeName(), filter.state.toString())
-                    is Filter.TriState -> PersistedFilterState(path, filter.name, filter.typeName(), filter.state.toString())
-                    is Filter.Select<*> -> PersistedFilterState(path, filter.name, filter.typeName(), filter.state.toString())
+                    is Filter.CheckBox -> PersistedFilterState(
+                        path,
+                        filter.name,
+                        filter.typeName(),
+                        filter.state.toString(),
+                    )
+                    is Filter.TriState -> PersistedFilterState(
+                        path,
+                        filter.name,
+                        filter.typeName(),
+                        filter.state.toString(),
+                    )
+                    is Filter.Select<*> -> PersistedFilterState(
+                        path,
+                        filter.name,
+                        filter.typeName(),
+                        filter.state.toString(),
+                    )
                     is Filter.Sort -> PersistedFilterState(
                         path = path,
                         name = filter.name,
