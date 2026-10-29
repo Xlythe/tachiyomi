@@ -38,7 +38,7 @@ tasks {
                 listOf(
                     "-Xcontext-receivers",
                     "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
-                )
+                ),
             )
         }
     }

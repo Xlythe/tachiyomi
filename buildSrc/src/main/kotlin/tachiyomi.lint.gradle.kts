@@ -13,7 +13,7 @@ extensions.configure<KtlintExtension>("ktlint") {
 
         // For some reason this is needed for Kotlin MPP
         exclude { tree ->
-            val path = tree.file.path
+            val path = tree.file.invariantSeparatorsPath
             listOf("/generated/").any {
                 path.contains(it)
             }

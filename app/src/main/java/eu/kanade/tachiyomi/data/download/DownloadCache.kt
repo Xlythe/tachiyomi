@@ -8,8 +8,8 @@ import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadIndexPage
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadIndexPrechecks
-import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadTraversal
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadPrechecks
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderDownloadTraversal
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -421,13 +421,18 @@ class DownloadCache(
         ReaderDownloadIndexPage.page(
             rootDownloadsDir.sourceDirs.keys,
             mangas = { rootDownloadsDir.sourceDirs.getValue(it).mangaDirs.keys },
-            uri = { source, manga -> rootDownloadsDir.sourceDirs.getValue(source).mangaDirs.getValue(manga).dir?.uri?.toString() },
+            uri = { source, manga ->
+                rootDownloadsDir.sourceDirs.getValue(
+                    source,
+                ).mangaDirs.getValue(manga).dir?.uri?.toString()
+            },
             chapters = { source, name ->
                 val manga = rootDownloadsDir.sourceDirs.getValue(source).mangaDirs.getValue(name)
                 (manga.chapterDirs as? java.util.NavigableSet<String>)
                     ?: java.util.TreeSet(manga.chapterDirs).also { manga.chapterDirs = it }
             },
-            after, limit,
+            after,
+            limit,
         )
     }
 

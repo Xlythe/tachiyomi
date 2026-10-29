@@ -311,6 +311,7 @@ class ReaderImageRulesTest {
             worker.join(2000)
         }
     }
+
     @Test
     fun boundedDecodeMatchesRegionalPixelsForTransparencyAndNonAlignedJpegBands() {
         val bitmap = Bitmap.createBitmap(137, 259, Bitmap.Config.ARGB_8888)
@@ -399,5 +400,4 @@ class ReaderImageRulesTest {
             ReaderImageRules.remove(hash)
         }
     }
-
 }

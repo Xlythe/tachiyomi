@@ -53,11 +53,16 @@ internal object ReaderDownloadIndexPrechecks {
                     require(validUri(uri))
                     ReaderDownloadTraversal.Chapter(readKey(row.getJSONObject("key")), uri)
                 }
-                traversal.restore(ReaderDownloadTraversal.State(
-                    ReaderDownloadTraversal.Token(version, root),
-                    data.optJSONObject("after")?.let(::readKey), pending, data.getBoolean("done"),
-                    data.optLong("checkedChapters"), data.optLong("unknownChapters"),
-                ))
+                traversal.restore(
+                    ReaderDownloadTraversal.State(
+                        ReaderDownloadTraversal.Token(version, root),
+                        data.optJSONObject("after")?.let(::readKey),
+                        pending,
+                        data.getBoolean("done"),
+                        data.optLong("checkedChapters"),
+                        data.optLong("unknownChapters"),
+                    ),
+                )
             }
         }.onFailure { healthy = false } // Preserve unsupported/corrupt evidence instead of overwriting it.
     }
@@ -79,7 +84,8 @@ internal object ReaderDownloadIndexPrechecks {
     private fun persistLocked() = runCatching {
         if (!healthy) return@runCatching
         val state = traversal.snapshot()
-        val rows = JSONArray(state.pending.map { JSONObject().put("key", keyJson(it.key)).put("mangaUri", it.mangaUri) })
+        val rows =
+            JSONArray(state.pending.map { JSONObject().put("key", keyJson(it.key)).put("mangaUri", it.mangaUri) })
         val data = JSONObject().put("schema", 1).put("version", state.token.version).put("root", state.token.root)
             .put("done", state.done).put("pending", rows)
             .put("checkedChapters", state.checkedChapters).put("unknownChapters", state.unknownChapters)
@@ -87,8 +93,13 @@ internal object ReaderDownloadIndexPrechecks {
         val bytes = data.toString().toByteArray()
         require(bytes.size <= 128 * 1024)
         val stream = index.startWrite()
-        try { stream.write(bytes); index.finishWrite(stream) }
-        catch (e: Throwable) { index.failWrite(stream); throw e }
+        try {
+            stream.write(bytes)
+            index.finishWrite(stream)
+        } catch (e: Throwable) {
+            index.failWrite(stream)
+            throw e
+        }
     }
 
     /** Installed only after the existing background inventory has finished with initialized extensions. */
@@ -119,7 +130,10 @@ internal object ReaderDownloadIndexPrechecks {
             var observedSignal = -1L
             try {
                 while (true) {
-                    val bound = synchronized(gate) { observedSignal = signals; binding } ?: break
+                    val bound = synchronized(gate) {
+                        observedSignal = signals
+                        binding
+                    } ?: break
                     val token = ReaderDownloadTraversal.Token(ReaderImageRules.precheckVersion(), bound.root)
                     val state = synchronized(gate) { traversal.begin(token).also { persistLocked() } }
                     if (state.done) break
@@ -130,7 +144,13 @@ internal object ReaderDownloadIndexPrechecks {
                             continue // Unavailable index is never an empty/completed index.
                         }
                         synchronized(gate) {
-                            require(rows.all { validUri(it.mangaUri) && it.key.manga.length <= 1024 && it.key.chapter.length <= 1024 })
+                            require(
+                                rows.all {
+                                    validUri(it.mangaUri) &&
+                                        it.key.manga.length <= 1024 &&
+                                        it.key.chapter.length <= 1024
+                                },
+                            )
                             if (binding === bound && traversal.offer(token, rows)) persistLocked()
                         }
                         continue
@@ -145,7 +165,19 @@ internal object ReaderDownloadIndexPrechecks {
                     }
                     if (root == null || !validUri(root.uri.toString())) {
                         // Removed/unavailable files remain unknown; skip metadata without writing a page verdict.
-                        synchronized(gate) { if (binding === bound && traversal.finish(token, chapter, checked = false)) persistLocked() }
+                        synchronized(
+                            gate,
+                        ) {
+                            if (binding === bound &&
+                                traversal.finish(
+                                    token, chapter,
+                                    checked =
+                                    false,
+                                )
+                            ) {
+                                persistLocked()
+                            }
+                        }
                         continue
                     }
                     val ticket = ReaderDownloadPrechecks.traversalTicket(root.uri, root.isDirectory)
@@ -157,8 +189,16 @@ internal object ReaderDownloadIndexPrechecks {
                             if (progress == ReaderDownloadSchedule.Progress.SUPERSEDED) break
                             if (progress != ReaderDownloadSchedule.Progress.WAITING) {
                                 // Failed work stays unknown in the bounded retry history; it cannot starve later chapters.
-                                synchronized(gate) { if (binding === bound && traversal.finish(token, chapter,
-                                    checked = progress == ReaderDownloadSchedule.Progress.COMPLETE)) persistLocked() }
+
+                                synchronized(gate) {
+                                    if (binding === bound && traversal.finish(
+                                            token, chapter,
+                                            checked = progress == ReaderDownloadSchedule.Progress.COMPLETE,
+                                        )
+                                    ) {
+                                        persistLocked()
+                                    }
+                                }
                                 break
                             }
                             delay(50)

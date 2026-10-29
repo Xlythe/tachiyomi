@@ -9,12 +9,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -55,10 +55,15 @@ internal object ReaderDownloadPrechecks {
                     require(validUri(uri))
                     val rulesVersion = row.optString("rulesVersion", "")
                     val checkedVersion = row.optString("checkedVersion", "")
-                    require(listOf(rulesVersion, checkedVersion).all { it.isEmpty() || it.matches(Regex("[0-9a-f]{64}")) })
+                    require(
+                        listOf(rulesVersion, checkedVersion).all { it.isEmpty() || it.matches(Regex("[0-9a-f]{64}")) },
+                    )
                     ReaderDownloadSchedule.Entry(
-                        uri, row.getBoolean("directory"), UUID.randomUUID().toString(),
-                        cursor = row.getInt("cursor").coerceIn(0, 10000), rulesVersion = rulesVersion,
+                        uri,
+                        row.getBoolean("directory"),
+                        UUID.randomUUID().toString(),
+                        cursor = row.getInt("cursor").coerceIn(0, 10000),
+                        rulesVersion = rulesVersion,
                         checkedVersion = checkedVersion,
                     )
                 }
@@ -73,7 +78,10 @@ internal object ReaderDownloadPrechecks {
         scope.launch {
             ReaderImageRules.revision.collectLatest {
                 delay(250)
-                synchronized(gate) { wake.trySend(Unit); startLocked() }
+                synchronized(gate) {
+                    wake.trySend(Unit)
+                    startLocked()
+                }
                 ReaderDownloadIndexPrechecks.rulesChanged()
             }
         }
@@ -125,16 +133,25 @@ internal object ReaderDownloadPrechecks {
 
     private fun persistLocked() = runCatching {
         if (!indexHealthy) return@runCatching
-        val rows = JSONArray(schedule.snapshot().map { item ->
-            JSONObject().put("uri", item.uri).put("directory", item.directory)
-                .put("cursor", item.cursor).put("rulesVersion", item.rulesVersion)
-                .put("checkedVersion", item.checkedVersion)
-        })
+        val rows = JSONArray(
+            schedule.snapshot().map { item ->
+                JSONObject().put("uri", item.uri).put("directory", item.directory)
+                    .put("cursor", item.cursor).put("rulesVersion", item.rulesVersion)
+                    .put("checkedVersion", item.checkedVersion)
+            },
+        )
         val bytes = JSONObject().put("version", 2).put("jobs", rows).toString().toByteArray()
         require(bytes.size <= 1024 * 1024)
         val output = index.startWrite()
-        try { output.write(bytes); index.finishWrite(output) }
-        catch (error: Throwable) { index.failWrite(output); throw error }
+        try {
+            output.write(bytes)
+            index.finishWrite(output)
+        } catch (
+            error: Throwable,
+        ) {
+            index.failWrite(output)
+            throw error
+        }
     }
 
     private fun startLocked() {
@@ -154,7 +171,10 @@ internal object ReaderDownloadPrechecks {
                         val finished = synchronized(gate) {
                             !schedule.hasPending(version)
                         }
-                        if (finished) { finishedNormally = true; break }
+                        if (finished) {
+                            finishedNormally = true
+                            break
+                        }
                         withTimeoutOrNull(10_000) { wake.receive() }
                         continue
                     }
@@ -164,8 +184,9 @@ internal object ReaderDownloadPrechecks {
                     }
                     val latest = ReaderImageRules.precheckVersion()
                     synchronized(gate) {
-                        if (completed) schedule.complete(next, latest)
-                        else if (latest == next.rulesVersion) schedule.failed(next, System.currentTimeMillis())
+                        if (completed) {
+                            schedule.complete(next, latest)
+                        } else if (latest == next.rulesVersion) schedule.failed(next, System.currentTimeMillis())
                         persistLocked()
                     }
                 }
@@ -177,7 +198,9 @@ internal object ReaderDownloadPrechecks {
                     // Comparing only lastVersion would lose a new rule when every old job was complete.
                     if (finishedNormally &&
                         (schedule.hasPending(lastVersion) || wake.tryReceive().isSuccess)
-                    ) startLocked()
+                    ) {
+                        startLocked()
+                    }
                 }
             }
         }
@@ -215,7 +238,10 @@ internal object ReaderDownloadPrechecks {
                 ZipFile(File("/proc/self/fd/${fd.fd}")).use { zip ->
                     val entries = zip.entries().asSequence().take(10001).toList()
                     if (entries.size > 10000 || cursor > entries.size ||
-                        entries.none { !it.isDirectory && eligible(it.name) }) return false
+                        entries.none { !it.isDirectory && eligible(it.name) }
+                    ) {
+                        return false
+                    }
                     incomplete = entries.any { it.name.endsWith(".tmp", true) }
                     for (i in cursor until entries.size) {
                         if (!stillQueued(item) || ReaderImageRules.precheckVersion() != version) return false

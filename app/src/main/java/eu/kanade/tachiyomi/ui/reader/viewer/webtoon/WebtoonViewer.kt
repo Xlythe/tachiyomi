@@ -13,10 +13,10 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.WebtoonLayoutManager
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.model.Page
-import eu.kanade.tachiyomi.ui.reader.ReaderChapterCompletion
-import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.ReaderChapterCompletion
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
+import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -275,16 +275,23 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         val item = adapter.items.getOrNull(position)
         // End-visible selection can land on the transition after a short cropped final page.
         // Report content completion independently of which row becomes the selected UI item.
-        if (pos == null) adapter.currentChapter?.let { chapter ->
-            val pages = chapter.pages?.filterNot { it is InsertPage }.orEmpty()
-            val terminal = ReaderChapterCompletion.terminalIndex(pages.map {
-                ReaderChapterCompletion.Page(it.index, it.isHidden,
-                    it.status == Page.State.READY && it.isWebtoonImageReady)
-            })
-            val terminalPage = pages.firstOrNull { it.index == terminal }
-            val terminalPosition = terminalPage?.let { adapter.items.indexOf(it) } ?: -1
-            if (ReaderChapterCompletion.reachesTerminal(terminalPosition, position)) {
-                activity.viewModel.onVisibleChapterEnd(chapter, requireNotNull(terminalPage).index)
+        if (pos == null) {
+            adapter.currentChapter?.let { chapter ->
+                val pages = chapter.pages?.filterNot { it is InsertPage }.orEmpty()
+                val terminal = ReaderChapterCompletion.terminalIndex(
+                    pages.map {
+                        ReaderChapterCompletion.Page(
+                            it.index,
+                            it.isHidden,
+                            it.status == Page.State.READY && it.isWebtoonImageReady,
+                        )
+                    },
+                )
+                val terminalPage = pages.firstOrNull { it.index == terminal }
+                val terminalPosition = terminalPage?.let { adapter.items.indexOf(it) } ?: -1
+                if (ReaderChapterCompletion.reachesTerminal(terminalPosition, position)) {
+                    activity.viewModel.onVisibleChapterEnd(chapter, requireNotNull(terminalPage).index)
+                }
             }
         }
         val allowPreload = checkAllowPreload(item as? ReaderPage)

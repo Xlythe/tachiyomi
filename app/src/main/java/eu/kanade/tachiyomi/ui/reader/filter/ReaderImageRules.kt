@@ -45,6 +45,7 @@ object ReaderImageRules {
 
     private lateinit var directory: File
     private lateinit var checkedStore: ReaderCheckedStore
+
     // A lazy template-evidence tier complements the completed-image cache; never eagerly prepare
     // samples on startup/import/save, and never wait for this disk writer on the display path.
     private lateinit var fingerprints: ReaderRuleFingerprintCache
@@ -85,7 +86,8 @@ object ReaderImageRules {
         if (::directory.isInitialized && directory == target) return
         directory = target.apply { mkdirs() }
         checkedStore = ReaderCheckedStore(File(context.filesDir, "reader-checked-v1"))
-        fingerprints = ReaderRuleFingerprintCache(File(context.filesDir, "reader-rule-fingerprints-lazy-v1"), 16L * 1024 * 1024)
+        fingerprints =
+            ReaderRuleFingerprintCache(File(context.filesDir, "reader-rule-fingerprints-lazy-v1"), 16L * 1024 * 1024)
         ReaderDownloadPrechecks.initialize(context.applicationContext)
         ReaderSpamReports.initialize(context.applicationContext)
     }
@@ -398,9 +400,11 @@ object ReaderImageRules {
                 ReaderCheckedStore.Key(digest, snapshot.corpus, matcherVersion),
                 snapshot.proofs,
             ) ?: listOf("legacy48-strip64-v3-thin192-v1", "legacy48-strip64-v2-complete").firstNotNullOfOrNull { old ->
-                retainPreviousPositive(checkedStore.read(
-                    ReaderCheckedStore.Key(digest, snapshot.corpus, "$old|${Build.FINGERPRINT}"), snapshot.proofs,
-                ))
+                retainPreviousPositive(
+                    checkedStore.read(
+                        ReaderCheckedStore.Key(digest, snapshot.corpus, "$old|${Build.FINGERPRINT}"), snapshot.proofs,
+                    ),
+                )
             }
             synchronized(this) {
                 if (snapshot.revision == revision.value) {
@@ -459,6 +463,9 @@ object ReaderImageRules {
             ReaderCheckedStore.Outcome.Complete(ReaderCheckedStore.Decision())
         } else {
             ReaderImageMask(bytes).use { image ->
+                require(image.canDecodeRegions || image.width.toLong() * image.height <= 4_000_000) {
+                    "Optional matching requires bounded decoding"
+                }
                 val exact = snapshot.rules.firstOrNull { it.getString("sha256") == hash(bytes) && !it.has("watermark") }
                 val evaluated = matchingBands(image, exact, snapshot.rules)
                 if (!evaluated.complete) {
@@ -538,7 +545,8 @@ object ReaderImageRules {
     private fun sampleSignature(candidate: JSONObject): ReaderImageSignature? = runCatching {
         val key = candidate.toString()
         synchronized(this) { signatures[key]?.let { return@runCatching it } }
-        val sample = fingerprints.read(candidate)?.signature ?: ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
+        val stored = fingerprints.read(candidate)?.signature
+        val sample = stored ?: ReaderImageMask(original(candidate.getString("sha256")).readBytes()).use {
             it.signature(candidate.getInt("removeTop"), candidate.getInt("removeBottom"))
         }
         synchronized(this) {
@@ -562,7 +570,9 @@ object ReaderImageRules {
         synchronized(this) {
             if (rules()[candidate.getString("sha256")]?.toString() == candidate.toString()) {
                 wholePixelEvidenceCache[key] = result
-                while (wholePixelEvidenceCache.size > 128) wholePixelEvidenceCache.remove(wholePixelEvidenceCache.keys.first())
+                while (wholePixelEvidenceCache.size > 128) wholePixelEvidenceCache.remove(
+                    wholePixelEvidenceCache.keys.first(),
+                )
             }
         }
         result
@@ -597,7 +607,14 @@ object ReaderImageRules {
         if (exact != null) matches += JSONObject(exact.toString())
         // An explicit whole-page hide already covers every pixel; other templates cannot add a removal.
         if (exact?.optBoolean("hide") == true) return BandEvaluation(matches, complete = true)
-        val exactRules = candidates.filter { !it.has("watermark") && (it.has("maskPixelSha256") || it.optBoolean("hide")) }
+        val exactRules =
+            candidates.filter {
+                !it.has("watermark") &&
+                    (
+                        it.has("maskPixelSha256") ||
+                            it.optBoolean("hide")
+                        )
+            }
         val hashes = mutableMapOf<Pair<Int, Int>, String>()
         for (candidate in exactRules) {
             if (matches.any { it.getString("sha256") == candidate.getString("sha256") }) continue
@@ -606,22 +623,34 @@ object ReaderImageRules {
             if (bandHeight > image.height) continue
             val whole = candidate.optBoolean("hide")
             val evidence = if (whole && !candidate.has("maskPixelSha256")) wholePixelEvidence(candidate) else null
-            if (whole && !candidate.has("maskPixelSha256") && evidence == null) { complete = false; continue }
+            if (whole && !candidate.has("maskPixelSha256") && evidence == null) {
+                complete = false
+                continue
+            }
             val probeOffset = evidence?.probe ?: candidate.getInt("maskProbeOffset")
             val probeExpected = evidence?.probeHash ?: candidate.getString("maskProbeSha256")
             val pixelsExpected = evidence?.pixelsHash ?: candidate.getString("maskPixelSha256")
-            val starts = if (whole) listOf(0, image.height - bandHeight).distinct() else listOf(when (candidate.getString("maskAnchor")) {
-                "top" -> 0
-                "bottom" -> image.height - bandHeight
-                else -> candidate.getInt("removeTop")
-            })
+            val starts = if (whole) {
+                listOf(0, image.height - bandHeight).distinct()
+            } else {
+                listOf(
+                    when (candidate.getString("maskAnchor")) {
+                        "top" -> 0
+                        "bottom" -> image.height - bandHeight
+                        else -> candidate.getInt("removeTop")
+                    },
+                )
+            }
             for (start in starts) {
                 val end = start + bandHeight
                 if (start < 0 || end > image.height || probeOffset !in 0 until bandHeight) continue
                 val probe = start + probeOffset
                 if (hashes.getOrPut(probe to probe + 1) { image.hashBand(probe, probe + 1) } != probeExpected) continue
                 if (hashes.getOrPut(start to end) { image.hashBand(start, end) } != pixelsExpected) continue
-                matches += JSONObject(candidate.toString()).apply { put("removeTop", start); put("removeBottom", end) }
+                matches += JSONObject(candidate.toString()).apply {
+                    put("removeTop", start)
+                    put("removeBottom", end)
+                }
             }
         }
         // Old rules participate without migration: derive signatures from the preserved originals.

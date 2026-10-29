@@ -22,9 +22,14 @@ internal object ReaderDownloadIndexPage {
                 val names = chapters(source, manga)
                 val remaining = if (after != null && source == after.source && manga == after.manga) {
                     names.tailSet(after.chapter, false)
-                } else names
+                } else {
+                    names
+                }
                 for (chapter in remaining) {
-                    result += ReaderDownloadTraversal.Chapter(ReaderDownloadTraversal.Key(source, manga, chapter), mangaUri)
+                    result += ReaderDownloadTraversal.Chapter(
+                        ReaderDownloadTraversal.Key(source, manga, chapter),
+                        mangaUri,
+                    )
                     if (result.size == limit) return result
                 }
             }

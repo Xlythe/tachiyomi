@@ -42,7 +42,7 @@ tasks {
             freeCompilerArgs.addAll(
                 listOf(
                     "-Xexpect-actual-classes",
-                )
+                ),
             )
         }
     }

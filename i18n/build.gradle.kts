@@ -44,9 +44,11 @@ tasks {
 
     withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
         compilerOptions {
-            freeCompilerArgs.addAll(listOf(
-                "-Xexpect-actual-classes",
-            ))
+            freeCompilerArgs.addAll(
+                listOf(
+                    "-Xexpect-actual-classes",
+                ),
+            )
         }
     }
 }

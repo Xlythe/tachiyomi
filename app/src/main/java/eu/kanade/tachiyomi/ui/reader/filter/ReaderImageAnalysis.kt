@@ -43,7 +43,13 @@ internal class ReaderImageSignature(val pixels: IntArray, val width: Int = 48) {
 
     /** Require texture and agreement across the complete proposed removal, including its edges. */
     fun agrees(other: ReaderImageSignature, start: Int, otherStart: Int, rows: Int): Boolean {
-        if (width != other.width || rows < 12 || start < 0 || otherStart < 0 || start + rows > height || otherStart + rows > other.height) {
+        if (width != other.width ||
+            rows < 12 ||
+            start < 0 ||
+            otherStart < 0 ||
+            start + rows > height ||
+            otherStart + rows > other.height
+        ) {
             return false
         }
         var error = 0L
@@ -90,6 +96,14 @@ internal class ReaderImageSignature(val pixels: IntArray, val width: Int = 48) {
     }
 
     companion object {
+        /** Preserve legacy sampling math but reject oversized optional signatures before allocating. */
+        fun rowsFor(width: Int, height: Int): Int {
+            require(width > 0 && height > 0)
+            val rows = (height * 48f / width).roundToInt().coerceAtLeast(1)
+            require(rows <= 4096) { "Optional signature exceeds its row budget" }
+            return rows
+        }
+
         /** Keep refined removal inside the pixels whose match was actually verified. */
         fun verifiedRemoval(top: Int, bottom: Int, verifiedTop: Int, verifiedBottom: Int): Boolean =
             verifiedTop >= 0 && verifiedTop <= top && top < bottom && bottom <= verifiedBottom

@@ -49,21 +49,30 @@ class ReaderCheckedIntegrationTest {
     }
     private fun variant(bytes: ByteArray, label: String) = bytes + (label + "-" + fixtureToken).toByteArray()
     private fun root(): File = File(context.cacheDir, "reader-checked-test-${UUID.randomUUID()}")
-        .apply { check(mkdirs()); ownedDirectories += this }
+        .apply {
+            check(mkdirs())
+            ownedDirectories += this
+        }
     private fun saveWhole(bytes: ByteArray) {
         ReaderImageRules.save(bytes, 0, 360, JSONObject())
         ownedRules += ReaderImageRules.hash(bytes)
     }
     private fun stored(hash: String): Boolean = File(context.filesDir, "reader-checked-v1").listFiles().orEmpty().any {
         it.name.endsWith(".checked") && runCatching {
-            DataInputStream(it.inputStream()).use { input -> input.readInt() == 0x52434431 && input.readUTF() == hash && input.readUTF() == ReaderImageRules.matcherVersion }
+            DataInputStream(it.inputStream()).use { input ->
+                input.readInt() == 0x52434431 && input.readUTF() == hash &&
+                    input.readUTF() == ReaderImageRules.matcherVersion
+            }
         }.getOrDefault(false)
     }
     private fun queued(uri: Uri): Boolean = runCatching {
-        val list = JSONObject(File(context.filesDir, "reader-download-prechecks-v2.json").readText()).getJSONArray("jobs")
+        val list = JSONObject(
+            File(context.filesDir, "reader-download-prechecks-v2.json").readText(),
+        ).getJSONArray("jobs")
         (0 until list.length()).any {
             val row = list.getJSONObject(it)
-            row.getString("uri") == uri.toString() && row.optString("checkedVersion") != ReaderImageRules.precheckVersion()
+            row.getString("uri") == uri.toString() &&
+                row.optString("checkedVersion") != ReaderImageRules.precheckVersion()
         }
     }.getOrDefault(false)
     private fun await(label: String, predicate: () -> Boolean) {
@@ -78,22 +87,32 @@ class ReaderCheckedIntegrationTest {
             val start = SystemClock.elapsedRealtime()
             val rendered = page.stream!!().use { it.readBytes() }
             assertTrue("Prechecked hide must be known before first render in another chapter", page.isHidden)
-            assertTrue("Cached decision must not wait for native comparisons", SystemClock.elapsedRealtime() - start <= 750)
-            assertEquals(1, requireNotNull(BitmapFactory.decodeByteArray(rendered, 0, rendered.size)).let {
-                it.height.also { _ -> it.recycle() }
-            })
+            assertTrue(
+                "Cached decision must not wait for native comparisons",
+                SystemClock.elapsedRealtime() - start <= 750,
+            )
+            assertEquals(
+                1,
+                requireNotNull(BitmapFactory.decodeByteArray(rendered, 0, rendered.size)).let {
+                    it.height.also { _ -> it.recycle() }
+                },
+            )
         }
     }
+
     @After fun cleanup() {
         ownedRules.forEach { ReaderImageRules.remove(it) }
         ownedDirectories.forEach { dir ->
-            check(dir.canonicalPath.startsWith(context.cacheDir.canonicalPath + File.separator + "reader-checked-test-"))
+            check(
+                dir.canonicalPath.startsWith(context.cacheDir.canonicalPath + File.separator + "reader-checked-test-"),
+            )
             dir.deleteRecursively()
         }
     }
 
     @Test fun completedDirectoriesAndCbzPersistBeforeRenderingAndIgnorePartialFiles() = runBlocking {
-        val original = fixture(17); saveWhole(original)
+        val original = fixture(17)
+        saveWhole(original)
         val folder = root()
         val completed = variant(original, "completed-folder")
         val partial = variant(original, "partial-folder")
@@ -119,7 +138,9 @@ class ReaderCheckedIntegrationTest {
         val zippedPartial = variant(original, "partial-cbz")
         ZipOutputStream(archive.outputStream()).use { zip ->
             for ((name, bytes) in listOf("001.png" to zipped, "002.png.tmp" to zippedPartial)) {
-                zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry()
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(bytes)
+                zip.closeEntry()
             }
         }
         val before = archive.readBytes()
@@ -135,7 +156,8 @@ class ReaderCheckedIntegrationTest {
     }
 
     @Test fun ruleRemovalInvalidatesAnInferredHideAndExactUserCropTakesPrecedence() = runBlocking {
-        val original = fixture(23); saveWhole(original)
+        val original = fixture(23)
+        saveWhole(original)
         val inferred = variant(original, "rules-and-manual-precedence")
         assertTrue(ReaderImageRules.precheckDownloaded(inferred))
         firstDisplayHides(inferred)
@@ -149,12 +171,14 @@ class ReaderCheckedIntegrationTest {
         val rendered = manual.stream!!().use { it.readBytes() }
         assertFalse(manual.isHidden)
         val decoded = requireNotNull(BitmapFactory.decodeByteArray(rendered, 0, rendered.size))
-        assertEquals(260, decoded.height); decoded.recycle()
+        assertEquals(260, decoded.height)
+        decoded.recycle()
         assertArrayEquals(inferred, ReaderImageRules.original(ReaderImageRules.hash(inferred)).readBytes())
     }
 
     @Test fun unsupportedOrTruncatedCompletedInputsNeverBecomeCleanDecisions() = runBlocking {
-        val original = fixture(31); saveWhole(original)
+        val original = fixture(31)
+        saveWhole(original)
         for (bytes in listOf(byteArrayOf(1, 2, 3, 4), original.copyOf(32))) {
             assertFalse(ReaderImageRules.precheckDownloaded(bytes))
             assertFalse(stored(ReaderImageRules.hash(bytes)))
@@ -166,15 +190,20 @@ class ReaderCheckedIntegrationTest {
 
     @Test fun cachedCropRemainsImmediateWhileAddedRulesRequireACompletedRefresh() = runBlocking {
         val original = fixture(73)
-        ReaderImageRules.save(original, 100, 200, JSONObject()); ownedRules += ReaderImageRules.hash(original)
+        ReaderImageRules.save(original, 100, 200, JSONObject())
+        ownedRules += ReaderImageRules.hash(original)
         val inferred = variant(original, "cached-crop-invalidation")
         assertTrue(ReaderImageRules.precheckDownloaded(inferred))
-        val unrelated = fixture(79); saveWhole(unrelated)
+        val unrelated = fixture(79)
+        saveWhole(unrelated)
         val page = ReaderPage(0, stream = { inferred.inputStream() })
-        val start = SystemClock.elapsedRealtime(); val result = page.stream!!().use { it.readBytes() }
-        assertTrue(SystemClock.elapsedRealtime() - start <= 750); assertFalse(page.isHidden)
+        val start = SystemClock.elapsedRealtime()
+        val result = page.stream!!().use { it.readBytes() }
+        assertTrue(SystemClock.elapsedRealtime() - start <= 750)
+        assertFalse(page.isHidden)
         val bitmap = requireNotNull(BitmapFactory.decodeByteArray(result, 0, result.size))
-        assertEquals(260, bitmap.height); bitmap.recycle()
+        assertEquals(260, bitmap.height)
+        bitmap.recycle()
         assertTrue(ReaderImageRules.precheckDownloaded(inferred))
         assertTrue(stored(ReaderImageRules.hash(inferred)))
     }
@@ -191,7 +220,8 @@ class ReaderCheckedIntegrationTest {
     }
 
     @Test fun newCompletedChapterAtTheSameUriSupersedesTheOldCursor() = runBlocking {
-        val original = fixture(67); saveWhole(original)
+        val original = fixture(67)
+        saveWhole(original)
         val folder = root()
         File(folder, "001.png").writeBytes(variant(original, "first-completed-generation"))
         File(folder, "002.png").writeBytes(byteArrayOf(7, 6, 5))
@@ -199,9 +229,12 @@ class ReaderCheckedIntegrationTest {
         ReaderDownloadPrechecks.enqueue(uri, true)
         await("First job must checkpoint its first page") {
             runCatching {
-                val rows = JSONObject(File(context.filesDir, "reader-download-prechecks-v2.json").readText()).getJSONArray("jobs")
+                val rows = JSONObject(
+                    File(context.filesDir, "reader-download-prechecks-v2.json").readText(),
+                ).getJSONArray("jobs")
                 (0 until rows.length()).any {
-                    val row = rows.getJSONObject(it); row.getString("uri") == uri.toString() && row.getInt("cursor") == 1
+                    val row = rows.getJSONObject(it)
+                    row.getString("uri") == uri.toString() && row.getInt("cursor") == 1
                 }
             }.getOrDefault(false)
         }
@@ -210,22 +243,26 @@ class ReaderCheckedIntegrationTest {
         File(folder, "002.png").writeBytes(variant(original, "second-completed-generation"))
         ReaderDownloadPrechecks.enqueue(uri, true)
         await("Recommitted chapter must be checked from its first page") { !queued(uri) }
-        assertTrue(stored(ReaderImageRules.hash(replacedFirst))); firstDisplayHides(replacedFirst)
+        assertTrue(stored(ReaderImageRules.hash(replacedFirst)))
+        firstDisplayHides(replacedFirst)
     }
 
     @Test fun preparePersistentDecisionsAndInterruptedDownloadForSeparateProcess() = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("readerCheckedRestart") == "prepare")
         assertEquals("Restart fixture needs isolated empty rules", 0, JSONArray(ReaderImageRules.export()).length())
         val dir = restartDirectory()
-        check(!dir.exists()); check(dir.mkdirs())
+        check(!dir.exists())
+        check(dir.mkdirs())
         val original = fixture(41)
         ReaderImageRules.save(original, 0, 360, JSONObject())
         val positive = variant(original, "restart-positive")
         val clean = fixture(53)
-        File(dir, "positive.png").writeBytes(positive); File(dir, "clean.png").writeBytes(clean)
+        File(dir, "positive.png").writeBytes(positive)
+        File(dir, "clean.png").writeBytes(clean)
         assertTrue(ReaderImageRules.precheckDownloaded(positive))
         assertTrue(ReaderImageRules.precheckDownloaded(clean))
-        assertTrue(stored(ReaderImageRules.hash(positive))); assertTrue(stored(ReaderImageRules.hash(clean)))
+        assertTrue(stored(ReaderImageRules.hash(positive)))
+        assertTrue(stored(ReaderImageRules.hash(clean)))
         firstDisplayHides(positive)
         val pending = File(dir, "pending").apply { check(mkdirs()) }
         File(pending, "001.png").writeBytes(byteArrayOf(1, 2, 3))
@@ -235,8 +272,10 @@ class ReaderCheckedIntegrationTest {
         Thread.sleep(150)
         assertTrue(queued(Uri.fromFile(pending)))
         assertFalse(stored(ReaderImageRules.hash(byteArrayOf(1, 2, 3))))
-        File(dir, "receipt.json").writeText(JSONObject().put("pid", Process.myPid())
-            .put("rule", ReaderImageRules.hash(original)).toString())
+        File(dir, "receipt.json").writeText(
+            JSONObject().put("pid", Process.myPid())
+                .put("rule", ReaderImageRules.hash(original)).toString(),
+        )
     }
 
     @Test fun verifyRestartUsesDiskBeforeDisplayAndResumesCompletedDownload() = runBlocking {
@@ -245,17 +284,21 @@ class ReaderCheckedIntegrationTest {
         val receipt = JSONObject(File(dir, "receipt.json").readText())
         assertNotEquals("Must be another Android process", receipt.getInt("pid"), Process.myPid())
         ownedRules += receipt.getString("rule")
-        val positive = File(dir, "positive.png").readBytes(); val clean = File(dir, "clean.png").readBytes()
-        assertTrue(stored(ReaderImageRules.hash(positive))); assertTrue(stored(ReaderImageRules.hash(clean)))
+        val positive = File(dir, "positive.png").readBytes()
+        val clean = File(dir, "clean.png").readBytes()
+        assertTrue(stored(ReaderImageRules.hash(positive)))
+        assertTrue(stored(ReaderImageRules.hash(clean)))
         firstDisplayHides(positive)
         val page = ReaderPage(400, stream = { clean.inputStream() })
         val start = SystemClock.elapsedRealtime()
-        assertArrayEquals(clean, page.stream!!().use { it.readBytes() }); assertFalse(page.isHidden)
+        assertArrayEquals(clean, page.stream!!().use { it.readBytes() })
+        assertFalse(page.isHidden)
         assertTrue(SystemClock.elapsedRealtime() - start <= 750)
         val pending = File(dir, "pending")
         await("Restarted worker must finish its persisted download cursor") { !queued(Uri.fromFile(pending)) }
         val resumed = File(dir, "pending-ready.png").readBytes()
-        assertTrue(stored(ReaderImageRules.hash(resumed))); firstDisplayHides(resumed)
+        assertTrue(stored(ReaderImageRules.hash(resumed)))
+        firstDisplayHides(resumed)
         File(dir, "verified.json").writeText(JSONObject().put("pid", Process.myPid()).put("verified", true).toString())
         // Keep the generated restart fixture/receipt as test evidence; no original corpus is involved.
     }

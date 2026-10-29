@@ -36,19 +36,25 @@ internal fun ReaderImageEditorLayout(
             toolbar()
             if (wide) {
                 Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.width(panelWidth).fillMaxHeight().verticalScroll(controlScroll),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(
+                        Modifier.width(panelWidth).fillMaxHeight().verticalScroll(controlScroll),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         controls()
                         footer()
                     }
                     imageContent(Modifier.weight(1f).fillMaxHeight())
                 }
             } else {
-                Column(Modifier.fillMaxWidth().heightIn(max = controlsHeight).verticalScroll(controlScroll),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) { controls() }
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = controlsHeight).verticalScroll(controlScroll),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) { controls() }
                 imageContent(Modifier.weight(1f).fillMaxWidth())
-                Column(Modifier.fillMaxWidth().heightIn(max = footerHeight).verticalScroll(footerScroll),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) { footer() }
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = footerHeight).verticalScroll(footerScroll),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) { footer() }
             }
         }
     }

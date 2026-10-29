@@ -2,16 +2,11 @@ package eu.kanade.tachiyomi.ui.reader.filter
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.os.Debug
-import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -19,7 +14,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.UUID
 import java.util.zip.ZipFile
 
 /** Opt-in local corpus check; user images are never bundled in the app or test APK. */
@@ -102,5 +96,4 @@ class ReaderImageCorpusTest {
         assertEquals(report.toString(), 0, failures.length())
         assertEquals(report.toString(), 0, falsePositives.length())
     }
-
 }

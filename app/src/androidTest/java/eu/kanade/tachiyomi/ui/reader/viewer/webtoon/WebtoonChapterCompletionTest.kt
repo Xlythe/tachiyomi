@@ -10,7 +10,10 @@ import androidx.recyclerview.widget.WebtoonLayoutManager
 import androidx.test.platform.app.InstrumentationRegistry
 import eu.kanade.tachiyomi.ui.reader.ReaderChapterCompletion
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageMask
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 
@@ -69,7 +72,10 @@ class WebtoonChapterCompletionTest {
                 itemAnimator = null
                 adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                     override fun getItemCount() = heights.size
-                    override fun onCreateViewHolder(parent: ViewGroup, type: Int) = object : RecyclerView.ViewHolder(View(context)) {}
+                    override fun onCreateViewHolder(
+                        parent: ViewGroup,
+                        type: Int,
+                    ) = object : RecyclerView.ViewHolder(View(context)) {}
                     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, index: Int) {
                         holder.itemView.layoutParams = RecyclerView.LayoutParams(600, heights[index])
                     }
@@ -77,14 +83,17 @@ class WebtoonChapterCompletionTest {
             }
             try {
                 fun layout() {
-                    recycler.measure(View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
-                        View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY))
+                    recycler.measure(
+                        View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+                    )
                     recycler.layout(0, 0, 600, 600)
                 }
-                layout(); manager.scrollToPositionWithOffset(position, 0); layout()
+                layout()
+                manager.scrollToPositionWithOffset(position, 0)
+                layout()
                 action(manager.findLastEndVisibleItemPosition())
-            } catch (error: Throwable) { failure = error }
-            finally { recycler.adapter = null }
+            } catch (error: Throwable) { failure = error } finally { recycler.adapter = null }
         }
         failure?.let { throw AssertionError("Visible chapter completion regression", it) }
     }

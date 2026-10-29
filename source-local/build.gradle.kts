@@ -45,7 +45,7 @@ tasks {
                 listOf(
                     "-Xexpect-actual-classes",
                     "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
-                )
+                ),
             )
         }
     }

@@ -28,6 +28,7 @@ internal class ReaderCheckedStore(
 
     data class Decision(val hidden: Boolean = false, val rendered: ByteArray? = null) {
         val matched get() = rendered != null
+
         // Hidden layout and encoded output are separate: the renderer returns a valid one-row PNG.
         init { require(!hidden || rendered != null) }
     }

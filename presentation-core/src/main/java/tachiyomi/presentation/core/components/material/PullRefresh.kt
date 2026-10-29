@@ -5,9 +5,9 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -37,12 +37,14 @@ fun PullRefresh(
             isRefreshing = refreshing,
             state = state,
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    Box(modifier = modifier
-        .pullToRefresh(state = state, isRefreshing = refreshing, onRefresh = onRefresh, enabled = enabled()),
-        contentAlignment = Alignment.TopStart) {
+    Box(
+        modifier = modifier
+            .pullToRefresh(state = state, isRefreshing = refreshing, onRefresh = onRefresh, enabled = enabled()),
+        contentAlignment = Alignment.TopStart,
+    ) {
         content()
         indicator()
     }

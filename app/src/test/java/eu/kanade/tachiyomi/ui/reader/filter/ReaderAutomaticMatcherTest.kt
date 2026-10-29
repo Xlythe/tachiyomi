@@ -6,8 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -115,7 +115,10 @@ class ReaderAutomaticMatcherTest {
     fun decoderAllocationFailureStaysUnknownInsteadOfEscapingTheOptionalWorker() {
         val escaped = CountDownLatch(1)
         val attempted = CountDownLatch(1)
-        val localScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> escaped.countDown() })
+        val localScope =
+            CoroutineScope(
+                SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> escaped.countDown() },
+            )
         val matcher = ReaderAutomaticMatcher(localScope, 8, { true }, {}, {
             attempted.countDown()
             throw OutOfMemoryError("Synthetic decoder allocation failure; no allocation performed")

@@ -47,8 +47,12 @@ class ReaderWatermarkEditorTest {
 
     @Test
     fun fourDragDirectionsCommitLastDisplayedBoundsWithoutFingerUpMovement() {
-        for (a in listOf(ImagePoint(10.0, 20.0), ImagePoint(40.0, 50.0),
-            ImagePoint(10.0, 50.0), ImagePoint(40.0, 20.0))) {
+        for (a in listOf(
+            ImagePoint(10.0, 20.0),
+            ImagePoint(40.0, 50.0),
+            ImagePoint(10.0, 50.0),
+            ImagePoint(40.0, 20.0),
+        )) {
             val b = ImagePoint(50 - a.x, 70 - a.y)
             val drawing = ReaderWatermarkEditor("image").begin(a).move(b, true)
             val displayed = drawing.displayedSelection
@@ -89,8 +93,10 @@ class ReaderWatermarkEditorTest {
         val closed = b.close()
         assertEquals(closed, closed.completePreview(tokenB))
         assertFalse(closed.canApply(101, 301))
-        assertEquals(ReaderWatermarkEditor("different", area),
-            ReaderWatermarkEditor("different", area).completePreview(tokenA))
+        assertEquals(
+            ReaderWatermarkEditor("different", area),
+            ReaderWatermarkEditor("different", area).completePreview(tokenA),
+        )
     }
 
     @Test

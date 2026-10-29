@@ -35,7 +35,7 @@ tasks {
             freeCompilerArgs.addAll(
                 listOf(
                     "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-                )
+                ),
             )
         }
     }

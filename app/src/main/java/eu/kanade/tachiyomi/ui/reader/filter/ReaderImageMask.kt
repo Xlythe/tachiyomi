@@ -123,7 +123,7 @@ internal class ReaderImageMask(
     }
 
     fun signature(top: Int = 0, bottom: Int = height): ReaderImageSignature {
-        val rows = ((bottom - top) * 48f / width).roundToInt().coerceAtLeast(1)
+        val rows = ReaderImageSignature.rowsFor(width, bottom - top)
         require(rows <= 4096) { "Image too long for similarity matching" }
         val small = Bitmap.createBitmap(48, rows, Bitmap.Config.ARGB_8888)
         try {
@@ -145,7 +145,10 @@ internal class ReaderImageMask(
         val band = if (decoder != null) {
             requireNotNull(decoder.decodeRegion(Rect(0, top, width, bottom), BitmapFactory.Options()))
         } else {
-            val full = fallback ?: requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size)).also { fallback = it }
+            val full =
+                fallback ?: requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size)).also {
+                    fallback = it
+                }
             Bitmap.createBitmap(full, 0, top, width, bottom - top)
         }
         var scaled: Bitmap? = null

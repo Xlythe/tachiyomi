@@ -43,7 +43,10 @@ internal class ReaderDownloadSchedule(private val limit: Int = 128) {
         if (uri !in entries) committed(uri, directory, generation)
         return entries.getValue(uri).copy()
     }
-    fun forget(uri: String) { entries.remove(uri); if (protectedUri == uri) protectedUri = null }
+    fun forget(uri: String) {
+        entries.remove(uri)
+        if (protectedUri == uri) protectedUri = null
+    }
     fun releaseTraversalTicket(uri: String) { if (protectedUri == uri) protectedUri = null }
     enum class Progress { WAITING, COMPLETE, FAILED, SUPERSEDED }
     fun progress(ticket: Entry, version: String): Progress {
@@ -78,7 +81,12 @@ internal class ReaderDownloadSchedule(private val limit: Int = 128) {
     }
     fun complete(item: Entry, latestVersion: String): Boolean {
         if (!current(item) || item.rulesVersion != latestVersion) return false
-        entries.getValue(item.uri).apply { checkedVersion = latestVersion; cursor = 0; failures = 0; retryAt = 0 }
+        entries.getValue(item.uri).apply {
+            checkedVersion = latestVersion
+            cursor = 0
+            failures = 0
+            retryAt = 0
+        }
         return true
     }
     fun failed(item: Entry, now: Long) {

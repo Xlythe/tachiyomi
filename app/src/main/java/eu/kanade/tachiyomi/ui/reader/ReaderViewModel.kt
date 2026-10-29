@@ -23,10 +23,10 @@ import eu.kanade.tachiyomi.data.saver.ImageSaver
 import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
-import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
@@ -452,8 +452,11 @@ class ReaderViewModel @JvmOverloads constructor(
     fun onVisibleChapterEnd(readerChapter: ReaderChapter, endVisibleIndex: Int) {
         val pages = readerChapter.pages?.filterNot { it is InsertPage } ?: return
         val snapshot = pages.map {
-            ReaderChapterCompletion.Page(it.index, it.isHidden,
-                it.status == Page.State.READY && it.isWebtoonImageReady)
+            ReaderChapterCompletion.Page(
+                it.index,
+                it.isHidden,
+                it.status == Page.State.READY && it.isWebtoonImageReady,
+            )
         }
         val terminal = ReaderChapterCompletion.terminalIndex(snapshot) ?: return
         if (endVisibleIndex < terminal) return
@@ -466,11 +469,13 @@ class ReaderViewModel @JvmOverloads constructor(
             readerChapter.chapter.read = true
             updateTrackChapterRead(readerChapter)
             deleteChapterIfNeeded(readerChapter)
-            updateChapter.await(ChapterUpdate(
-                id = readerChapter.chapter.id!!.toLong(),
-                read = true,
-                lastPageRead = readerChapter.chapter.last_page_read.toLong(),
-            ))
+            updateChapter.await(
+                ChapterUpdate(
+                    id = readerChapter.chapter.id!!.toLong(),
+                    read = true,
+                    lastPageRead = readerChapter.chapter.last_page_read.toLong(),
+                ),
+            )
         }
     }
 

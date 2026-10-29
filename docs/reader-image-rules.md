@@ -30,11 +30,14 @@ Saved originals and
 pixel coordinates remain the evidence for each rule.
 Animated images become a static first-frame image when cropped.
 
-Derived signatures and whole-page fingerprints are prepared by a background
-worker. Until preparation finishes, exact saved-image hides and explicit crops
-still apply; unfamiliar images remain visible rather than using incomplete
-matching evidence. The editor shows preparation and limited-availability status.
-Completion refreshes current reader pages without changing saved visibility hints.
+Derived template evidence is prepared lazily by background matching, outside
+the reader display path. Completed image decisions have a bounded persistent
+cache keyed by content hash and rule/matcher version. Exact saved-image hides
+and explicit crops apply immediately; unfamiliar images can appear before an
+automatic decision completes. Stale or failed checks never count as clean.
+Completed downloads are prechecked asynchronously, including bounded resumable
+traversal of the existing download index after rule changes. The editor does not
+wait for automatic matching or contrast scans. See [integration notes](reader-master-integration.md).
 
 The disposable derived cache is separate from originals and rules. Keys include
 source checksum, crop coordinates, algorithm version and Android decoder build.

@@ -37,6 +37,7 @@ internal class ReaderDownloadTraversal {
         state = state.copy(pending = chapters.toList(), done = chapters.isEmpty())
         return true
     }
+
     /** A removed/failed chapter may be passed without ever recording a clean page decision. */
     fun finish(token: Token, chapter: Chapter, checked: Boolean = true): Boolean {
         if (!current(token) || state.pending.firstOrNull() != chapter) return false

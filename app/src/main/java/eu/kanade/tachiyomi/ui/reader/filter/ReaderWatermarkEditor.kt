@@ -32,7 +32,10 @@ internal data class ImageBounds(val left: Double, val top: Double, val right: Do
 
     companion object {
         fun between(a: ImagePoint, b: ImagePoint) = ImageBounds(
-            minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y),
+            minOf(a.x, b.x),
+            minOf(a.y, b.y),
+            maxOf(a.x, b.x),
+            maxOf(a.y, b.y),
         )
     }
 }
@@ -67,8 +70,10 @@ internal class ReaderImageTransform(
     fun toSource(point: ImagePoint) = ImagePoint((point.x - origin.x) / scale, (point.y - origin.y) / scale)
 
     fun watermarkPoint(point: ImagePoint): ImagePoint = toSource(point).let {
-        ImagePoint(it.x.coerceIn(1.0, (sourceWidth - 1).coerceAtLeast(1).toDouble()),
-            it.y.coerceIn(0.0, sourceHeight.toDouble()))
+        ImagePoint(
+            it.x.coerceIn(1.0, (sourceWidth - 1).coerceAtLeast(1).toDouble()),
+            it.y.coerceIn(0.0, sourceHeight.toDouble()),
+        )
     }
 }
 
@@ -107,20 +112,40 @@ internal data class ReaderWatermarkEditor(
         val idle = copy(phase = Phase.IDLE, anchor = null, draft = null)
         return if (phase == Phase.DRAWING && next != null && next.right > next.left && next.bottom > next.top) {
             idle.select(next)
-        } else idle
+        } else {
+            idle
+        }
     }
 
     fun cancelGesture() = copy(phase = Phase.IDLE, anchor = null, draft = null)
 
-    fun select(area: ImageBounds?): ReaderWatermarkEditor = if (closed || area == selection) this else copy(
-        selection = area, previous = selection, canUndo = true, revision = revision + 1,
-        serial = serial + 1, pending = null, ready = null,
-    )
+    fun select(area: ImageBounds?): ReaderWatermarkEditor = if (closed || area == selection) {
+        this
+    } else {
+        copy(
+            selection = area,
+            previous = selection,
+            canUndo = true,
+            revision = revision + 1,
+            serial = serial + 1,
+            pending = null,
+            ready = null,
+        )
+    }
 
-    fun undo() = if (closed || gesturing || !canUndo) this else copy(
-        selection = previous, previous = null, canUndo = false, revision = revision + 1,
-        serial = serial + 1, pending = null, ready = null,
-    )
+    fun undo() = if (closed || gesturing || !canUndo) {
+        this
+    } else {
+        copy(
+            selection = previous,
+            previous = null,
+            canUndo = false,
+            revision = revision + 1,
+            serial = serial + 1,
+            pending = null,
+            ready = null,
+        )
+    }
 
     fun requestPreview(width: Int, height: Int): ReaderWatermarkEditor {
         val area = selection?.pixels(width, height) ?: return this
@@ -135,8 +160,14 @@ internal data class ReaderWatermarkEditor(
     fun close() = cancelGesture().cancelPreview().copy(closed = true)
 
     fun canApply(width: Int, height: Int): Boolean = !closed && !gesturing && pending == null &&
-        (ready?.let { it.imageKey == imageKey && it.revision == revision && it.area == selection?.pixels(width, height) }
-            == true)
+        (
+            ready?.let {
+                it.imageKey == imageKey &&
+                    it.revision == revision &&
+                    it.area == selection?.pixels(width, height)
+            }
+                == true
+            )
 
     private fun accepts(token: Preview) = !closed && pending == token && token.imageKey == imageKey &&
         token.revision == revision && token.serial == serial
