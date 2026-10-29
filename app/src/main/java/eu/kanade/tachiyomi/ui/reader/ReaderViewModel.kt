@@ -461,8 +461,13 @@ class ReaderViewModel @JvmOverloads constructor(
         val terminal = ReaderChapterCompletion.terminalIndex(snapshot) ?: return
         if (endVisibleIndex < terminal) return
         val revision = ReaderImageRules.revision.value
+        val chapterRevision = readerChapter.review?.visibilityRevision
         viewModelScope.launchNonCancellable {
-            if (revision != ReaderImageRules.revision.value) return@launchNonCancellable
+            if (revision != ReaderImageRules.revision.value ||
+                chapterRevision != readerChapter.review?.visibilityRevision
+            ) {
+                return@launchNonCancellable
+            }
             if (incognitoMode || readerChapter.chapter.read) return@launchNonCancellable
             // Keep original indexes; hidden trailing pages do not manufacture a new selected page.
             readerChapter.chapter.last_page_read = maxOf(readerChapter.chapter.last_page_read, terminal)
@@ -778,6 +783,15 @@ class ReaderViewModel @JvmOverloads constructor(
         mutableState.update { it.copy(dialog = Dialog.PageActions(original)) }
     }
 
+    fun openChapterSpamReview() {
+        val chapter = state.value.currentChapter ?: return
+        mutableState.update { it.copy(dialog = Dialog.ChapterSpamReview(chapter)) }
+    }
+
+    fun openImageMask(page: ReaderPage) {
+        mutableState.update { it.copy(dialog = Dialog.ImageMask(page)) }
+    }
+
     fun openImageMask() {
         val page = (state.value.dialog as? Dialog.PageActions)?.page ?: return
         mutableState.update { it.copy(dialog = Dialog.ImageMask(page)) }
@@ -1011,6 +1025,7 @@ class ReaderViewModel @JvmOverloads constructor(
         data object OrientationModeSelect : Dialog
         data class PageActions(val page: ReaderPage) : Dialog
         data class ImageMask(val page: ReaderPage) : Dialog
+        data class ChapterSpamReview(val chapter: ReaderChapter) : Dialog
     }
 
     sealed interface Event {

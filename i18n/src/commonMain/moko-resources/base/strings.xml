@@ -939,4 +939,26 @@
     <string name="reader_restore_image">Restore original</string>
     <string name="reader_mask_apply">Apply</string>
     <string name="reader_image_rule_saved">Image rule saved</string>
+    <string name="reader_chapter_spam_review">Review excluded pages</string>
+    <string name="reader_review_not_ready">Open a loaded chapter to review its pages.</string>
+    <string name="reader_review_collecting_sizes">Checking available page sizes. Pages stay visible until there is enough evidence.</string>
+    <string name="reader_review_normal_size">Normal pages: %1$d × %2$d</string>
+    <string name="reader_review_normal_width">Normal width: %1$d px; page heights vary</string>
+    <string name="reader_review_scope">Original images are preserved. Restore and Exclude affect only this chapter. Automatic removes your chapter override.</string>
+    <string name="reader_review_save_error">Could not read or save a chapter choice. Existing choices were preserved.</string>
+    <string name="reader_review_show_all">Show all pages</string>
+    <string name="reader_review_none">No excluded pages found so far.</string>
+    <string name="reader_review_original_page">Original page %1$d</string>
+    <string name="reader_review_preview_unavailable">Original preview unavailable</string>
+    <string name="reader_review_page_number">Page %1$d of %2$d</string>
+    <string name="reader_review_restored">Restored in this chapter</string>
+    <string name="reader_review_explicit_hide">Excluded in this chapter</string>
+    <string name="reader_review_different_width">Different width from the chapter majority</string>
+    <string name="reader_review_short_height">Shorter than the chapter’s normal pages</string>
+    <string name="reader_review_saved_rule">Matched a saved spam rule</string>
+    <string name="reader_review_included">Included</string>
+    <string name="reader_review_exclude">Exclude</string>
+    <string name="reader_review_restore">Restore</string>
+    <string name="reader_review_automatic">Automatic</string>
+    <string name="reader_review_edit_rule">Edit image rule</string>
 </resources>

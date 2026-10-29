@@ -43,6 +43,7 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.OrientationSelectDialog
 import eu.kanade.presentation.reader.PageIndicatorText
+import eu.kanade.presentation.reader.ReaderChapterSpamReviewDialog
 import eu.kanade.presentation.reader.ReaderContentOverlay
 import eu.kanade.presentation.reader.ReaderImageMaskDialog
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
@@ -360,6 +361,7 @@ class ReaderActivity : BaseActivity() {
                 onToggleBookmarked = viewModel::toggleChapterBookmark,
                 onOpenInWebView = ::openChapterInWebView.takeIf { isHttpSource },
                 onShare = ::shareChapter.takeIf { isHttpSource },
+                onReviewChapter = (viewModel::openChapterSpamReview).takeIf { state.currentChapter?.pages != null },
 
                 viewer = state.viewer,
                 onNextChapter = ::loadNextChapter,
@@ -450,6 +452,13 @@ class ReaderActivity : BaseActivity() {
                         onShare = viewModel::shareImage,
                         onSave = viewModel::saveImage,
                         onHide = viewModel::openImageMask,
+                    )
+                }
+                is ReaderViewModel.Dialog.ChapterSpamReview -> {
+                    ReaderChapterSpamReviewDialog(
+                        chapter = dialog.chapter,
+                        onDismiss = onDismissRequest,
+                        onEdit = { viewModel.openImageMask(it) },
                     )
                 }
                 is ReaderViewModel.Dialog.ImageMask -> {

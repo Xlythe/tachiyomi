@@ -47,6 +47,7 @@ fun ReaderAppBars(
     onToggleBookmarked: () -> Unit,
     onOpenInWebView: (() -> Unit)?,
     onShare: (() -> Unit)?,
+    onReviewChapter: (() -> Unit)? = null,
 
     viewer: Viewer?,
     onNextChapter: () -> Unit,
@@ -119,6 +120,14 @@ fun ReaderAppBars(
                                         onClick = onToggleBookmarked,
                                     ),
                                 )
+                                onReviewChapter?.let {
+                                    add(
+                                        AppBar.OverflowAction(
+                                            title = stringResource(MR.strings.reader_chapter_spam_review),
+                                            onClick = it,
+                                        ),
+                                    )
+                                }
                                 onOpenInWebView?.let {
                                     add(
                                         AppBar.OverflowAction(

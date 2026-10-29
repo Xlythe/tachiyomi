@@ -374,9 +374,17 @@ object ReaderImageRules {
     }
 
     /** Persisted and exact decisions are checked before display; no native comparison runs here. */
-    fun openForDisplay(onMatch: (Boolean) -> Unit = {}, original: () -> InputStream): InputStream {
+    fun openForDisplay(onMatch: (Boolean) -> Unit = {}, original: () -> InputStream): InputStream =
+        openForDisplayWithReview(onMatch, original, null)
+
+    internal fun openForDisplayWithReview(
+        onMatch: (Boolean) -> Unit,
+        original: () -> InputStream,
+        onOriginal: ((ByteArray, String) -> InputStream?)?,
+    ): InputStream {
         val bytes = original().use { it.readBytes() }
         val digest = hash(bytes)
+        onOriginal?.invoke(bytes, digest)?.let { return it }
         repeat(2) {
             val snapshot: CheckedSnapshot
             val memoryKey: String

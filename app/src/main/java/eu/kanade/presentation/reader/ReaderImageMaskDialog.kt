@@ -357,6 +357,7 @@ private fun ReaderImageMaskDialogContent(
                         withContext(Dispatchers.IO) {
                             if (restore) {
                                 ReaderImageRules.remove(existingHash ?: ReaderImageRules.hash(raw))
+                                page.chapterReview?.restoreOriginal(page, raw)
                             } else {
                                 fun save() = ReaderImageRules.save(
                                     raw,
@@ -372,6 +373,7 @@ private fun ReaderImageMaskDialogContent(
                                 } else {
                                     watermarkPreviewMutex.withLock { save() }
                                 }
+                                page.chapterReview?.savedRule(page, raw)
                                 if (savedWatermark == null) {
                                     reportQueued =
                                         ReaderSpamReports.enqueueExplicit(ReaderImageRules.hash(raw), metadata)

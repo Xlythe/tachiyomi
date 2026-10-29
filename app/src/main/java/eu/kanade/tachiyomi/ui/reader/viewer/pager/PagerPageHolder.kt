@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import androidx.core.view.isVisible
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderChapterReviews
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -112,7 +113,8 @@ class PagerPageHolder(
                 page.statusFlow,
                 ReaderImageRules.revision,
                 ReaderImageRules.automaticRevision,
-            ) { state, _, _ -> state }.collectLatest { state ->
+                ReaderChapterReviews.revision,
+            ) { state, _, _, _ -> state }.collectLatest { state ->
                 when (state) {
                     Page.State.QUEUE -> setQueued()
                     Page.State.LOAD_PAGE -> setLoading()

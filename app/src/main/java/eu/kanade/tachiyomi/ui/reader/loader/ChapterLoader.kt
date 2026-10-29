@@ -6,6 +6,8 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderChapterReview
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderChapterReviews
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import tachiyomi.core.i18n.stringResource
 import tachiyomi.core.storage.UniFileTempFileManager
@@ -58,7 +60,14 @@ class ChapterLoader(
                     chapter.requestedPage = chapter.chapter.last_page_read
                 }
 
+                chapter.review?.close()
+                chapter.review = ReaderChapterReview(
+                    pages,
+                    "${chapter.chapter.manga_id}:${chapter.chapter.id ?: chapter.chapter.url}",
+                    ReaderChapterReviews.store(context.applicationContext),
+                )
                 chapter.state = ReaderChapter.State.Loaded(pages)
+                chapter.review?.start()
             } catch (e: Throwable) {
                 chapter.state = ReaderChapter.State.Error(e)
                 throw e

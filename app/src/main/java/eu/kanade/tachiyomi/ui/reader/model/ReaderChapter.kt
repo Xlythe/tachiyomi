@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader.model
 
 import eu.kanade.domain.chapter.model.toDbChapter
 import eu.kanade.tachiyomi.data.database.models.Chapter
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderChapterReview
 import eu.kanade.tachiyomi.ui.reader.loader.PageLoader
 import kotlinx.coroutines.flow.MutableStateFlow
 import tachiyomi.core.util.system.logcat
@@ -19,6 +20,7 @@ data class ReaderChapter(val chapter: Chapter) {
         get() = (state as? State.Loaded)?.pages
 
     var pageLoader: PageLoader? = null
+    internal var review: ReaderChapterReview? = null
 
     var requestedPage: Int = 0
 
@@ -33,6 +35,8 @@ data class ReaderChapter(val chapter: Chapter) {
     fun unref() {
         references--
         if (references == 0) {
+            review?.close()
+            review = null
             if (pageLoader != null) {
                 logcat { "Recycling chapter ${chapter.name}" }
             }

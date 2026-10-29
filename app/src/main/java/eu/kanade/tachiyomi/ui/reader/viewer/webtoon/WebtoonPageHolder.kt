@@ -13,6 +13,7 @@ import androidx.core.view.updateMargins
 import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderChapterReviews
 import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
@@ -122,11 +123,18 @@ class WebtoonPageHolder(
         publishVisibleContent(token, ReaderImageRules.revision.value)
     }
 
-    private fun publishVisibleContent(token: Long, revision: Long) {
+    private fun publishVisibleContent(
+        token: Long,
+        revision: Long,
+        chapterRevision: Long = page?.chapterVisibilityRevision ?: -1L,
+        source: (() -> java.io.InputStream)? = page?.originalStream,
+    ) {
         val bound = page ?: return
         frame.doOnLayout {
-            if (geometry.isCurrent(token) && page === bound && revision == ReaderImageRules.revision.value) {
-                bound.markWebtoonImageReady(revision)
+            if (geometry.isCurrent(token) && page === bound && revision == ReaderImageRules.revision.value &&
+                chapterRevision == bound.chapterVisibilityRevision && source === bound.originalStream
+            ) {
+                bound.markWebtoonImageReady(revision, chapterRevision, source)
                 viewer.recycler.post {
                     if (geometry.isCurrent(token) && page === bound) viewer.onScrolled()
                 }
@@ -171,7 +179,8 @@ class WebtoonPageHolder(
                 page.statusFlow,
                 ReaderImageRules.revision,
                 ReaderImageRules.automaticRevision,
-            ) { state, _, _ -> state }.collectLatest { state ->
+                ReaderChapterReviews.revision,
+            ) { state, _, _, _ -> state }.collectLatest { state ->
                 when (state) {
                     Page.State.QUEUE -> setQueued()
                     Page.State.LOAD_PAGE -> setLoading()
@@ -223,6 +232,8 @@ class WebtoonPageHolder(
         val page = page ?: return
         val token = geometry.begin()
         val imageRevision = ReaderImageRules.revision.value
+        val chapterRevision = page.chapterVisibilityRevision
+        val originalSource = page.originalStream
         page.invalidateWebtoonImage()
         if (page.isHidden) {
             showHidden(token)
@@ -278,7 +289,7 @@ class WebtoonPageHolder(
                         frame.imageDimensions()?.let { (width, height) ->
                             page.displayDimensions = width to height
                             geometry.loaded(token, width, height)
-                            publishVisibleContent(token, imageRevision)
+                            publishVisibleContent(token, imageRevision, chapterRevision, originalSource)
                         }
                         onImageDecoded()
                     }
