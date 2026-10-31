@@ -17,7 +17,10 @@ class ReaderPageVisibilityTest {
         flow {
             emit(0L)
             yield()
-            repeat(12) { emit(it + 1L); yield() }
+            repeat(12) {
+                emit(it + 1L)
+                yield()
+            }
             ownRevision = 1L
             emit(13L)
             yield()
@@ -52,7 +55,10 @@ class ReaderPageVisibilityTest {
 
     @Test fun aNewSubscriptionStartsWithItsCurrentPageAndDoesNotReplayOldDecisions() = runBlocking {
         var revision = 3L
-        val notifications = flow { emit(100L); emit(101L) }
+        val notifications = flow {
+            emit(100L)
+            emit(101L)
+        }
         assertEquals(listOf(3L), notifications.forPageVisibility { revision }.toList())
         revision = 7L
         assertEquals(listOf(7L), notifications.forPageVisibility { revision }.toList())
