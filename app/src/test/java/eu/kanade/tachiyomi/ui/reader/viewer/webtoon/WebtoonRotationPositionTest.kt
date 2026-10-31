@@ -109,7 +109,15 @@ class WebtoonRotationPositionTest {
                     if (page == null) 0 else (12000L * width / 720).toInt(),
                 )
             }
-            val chapter = ReaderChapter(ChapterImpl().apply { id = 47; manga_id = 72 })
+            val chapter = ReaderChapter(
+                ChapterImpl().apply {
+                    id = 47
+                    manga_id = 72
+                    url = "/chapter/47"
+                    name = "Long-page fixture"
+                    chapter_number = 1f
+                },
+            )
             chapter.state = ReaderChapter.State.Loaded(
                 listOf(
                     ReaderPage(0).apply {
