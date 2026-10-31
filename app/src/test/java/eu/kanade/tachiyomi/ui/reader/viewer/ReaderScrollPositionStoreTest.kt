@@ -31,7 +31,10 @@ class ReaderScrollPositionStoreTest {
     private var time = 1000L
 
     @Before fun setup() {
-        preferences = RuntimeEnvironment.getApplication().getSharedPreferences("scroll-position-store-tests", Context.MODE_PRIVATE)
+        preferences = RuntimeEnvironment.getApplication().getSharedPreferences(
+            "scroll-position-store-tests",
+            Context.MODE_PRIVATE,
+        )
         preferences.edit().clear().commit()
         store = ReaderScrollPositionStore(preferences, limit = 2, clock = { time++ })
     }
@@ -126,9 +129,11 @@ class ReaderScrollPositionStoreTest {
     @Test fun separateWritersStillRespectTheSharedBound() {
         val executor = Executors.newFixedThreadPool(2)
         try {
-            executor.invokeAll((47L..66L).map { id ->
-                Callable { ReaderScrollPositionStore(preferences, limit = 2).write(chapter(id), position(id)) }
-            }).forEach { it.get() }
+            executor.invokeAll(
+                (47L..66L).map { id ->
+                    Callable { ReaderScrollPositionStore(preferences, limit = 2).write(chapter(id), position(id)) }
+                },
+            ).forEach { it.get() }
             assertEquals(2, preferences.all.keys.count { it.startsWith("chapter:") })
         } finally { executor.shutdown() }
     }
@@ -146,7 +151,10 @@ class ReaderScrollPositionStoreTest {
             ClassParameter.from(File::class.java, file),
             ClassParameter.from(Int::class.javaPrimitiveType!!, Context.MODE_PRIVATE),
         )
-        assertEquals(requireNotNull(store.read(chapter(47))).anchor, ReaderScrollPositionStore(cold).read(chapter(47))?.anchor)
+        assertEquals(
+            requireNotNull(store.read(chapter(47))).anchor,
+            ReaderScrollPositionStore(cold).read(chapter(47))?.anchor,
+        )
     }
 
     private fun chapter(id: Long) = ReaderScrollPositionStore.Chapter(72, id, "/chapter/$id")
