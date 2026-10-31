@@ -127,6 +127,8 @@ android {
         checkReleaseBuilds = false
     }
 
+    testOptions.unitTests.isIncludeAndroidResources = true
+
     composeOptions {
         kotlinCompilerExtensionVersion = compose.versions.compiler.get()
     }
@@ -243,6 +245,10 @@ dependencies {
 
     // Tests
     testImplementation(libs.bundles.test)
+    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation(platform(compose.bom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:6.0.1")
     androidTestImplementation(androidx.test.ext)
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation(platform(compose.bom))
