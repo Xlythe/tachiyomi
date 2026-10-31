@@ -26,8 +26,23 @@ class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
     private var readerAnchor: ReaderScrollAnchor? = null
     private var requestedAnchorPosition = NO_POSITION
     private var appliedAnchor: AppliedAnchor? = null
+    private var hierarchyPositionDiscarded = false
     internal var onReaderAnchorRestored: (() -> Unit)? = null
     internal val isRestoringReaderAnchor: Boolean get() = readerAnchor != null
+
+    internal fun readingPosition(): ReaderScrollAnchor? = readerAnchor ?: captureReaderAnchor()
+
+    internal fun restoreReadingPosition(anchor: ReaderScrollAnchor) {
+        readerAnchor = anchor
+        requestedAnchorPosition = NO_POSITION
+        appliedAnchor = null
+        requestLayout()
+    }
+
+    internal fun discardPendingHierarchyPosition() {
+        hierarchyPositionDiscarded = true
+        cancelReaderAnchorRestoration()
+    }
 
     private data class PositionedPage(val position: Int, val page: ReaderPage, val key: ReaderScrollAnchor.Key)
     private data class AppliedAnchor(val position: Int, val width: Int, val imageHeight: Int, val offset: Int)
@@ -48,6 +63,7 @@ class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
 
     @Suppress("DEPRECATION")
     override fun onRestoreInstanceState(state: Parcelable?) {
+        if (hierarchyPositionDiscarded) return // A deliberate page choice wins over a later framework callback.
         if (state !is Bundle || state.getInt("reader_anchor_version") != 1) {
             super.onRestoreInstanceState(state)
             return

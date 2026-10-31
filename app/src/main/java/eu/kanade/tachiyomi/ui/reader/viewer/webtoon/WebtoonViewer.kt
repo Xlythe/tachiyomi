@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 
+import android.content.Context
 import android.graphics.PointF
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -7,24 +8,29 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import androidx.core.app.ActivityCompat
+import androidx.core.view.doOnNextLayout
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.WebtoonLayoutManager
+import eu.kanade.domain.base.BasePreferences
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderChapterCompletion
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
+import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.viewer.ReaderScrollPositionStore
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
+import logcat.LogPriority
 import tachiyomi.core.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -71,6 +77,114 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * Adapter of the recycler view.
      */
     private val adapter = WebtoonAdapter(this)
+
+    private val positionIncognito = Injekt.get<BasePreferences>().incognitoMode()
+    private var privatePositionSession = positionIncognito.get()
+    private val positions by lazy {
+        ReaderScrollPositionStore(
+            activity.applicationContext.getSharedPreferences(
+                ReaderScrollPositionStore.PREFERENCES_NAME,
+                Context.MODE_PRIVATE,
+            ),
+        )
+    }
+    private var navigationGeneration = 0L
+    private var pendingManualLayout = false
+    private val positionCheckpoint = Runnable { saveReadingPosition() }
+
+    private fun mayWritePosition(): Boolean {
+        // Disabling incognito finishes the activity; never save that private session during its final pause.
+        if (positionIncognito.get()) privatePositionSession = true
+        return !privatePositionSession
+    }
+
+    private fun positionChapter(chapter: ReaderChapter): ReaderScrollPositionStore.Chapter? {
+        val id = chapter.chapter.id ?: return null
+        val manga = chapter.chapter.manga_id ?: return null
+        val url = chapter.chapter.url
+        if (id < 0 || manga < 0 || url.isBlank()) return null
+        return ReaderScrollPositionStore.Chapter(manga, id, url)
+    }
+
+    private fun checkpointPositionLater() {
+        recycler.removeCallbacks(positionCheckpoint)
+        if (mayWritePosition()) recycler.postDelayed(positionCheckpoint, 750)
+    }
+
+    private fun forgetSavedPosition(chapter: ReaderChapter) {
+        if (!mayWritePosition()) return
+        runCatching { positionChapter(chapter)?.let { positions.remove(it) } }
+            .onFailure { logcat(LogPriority.ERROR, it) { "Could not discard old reader position" } }
+    }
+
+    override fun saveReadingPosition() {
+        if (!mayWritePosition() || pendingManualLayout) return
+        try {
+            val chapter = adapter.currentChapter ?: return
+            val key = positionChapter(chapter) ?: return
+            val pages = chapter.pages?.filterNot { it is InsertPage }?.takeIf { it.isNotEmpty() } ?: return
+            if (!layoutManager.isRestoringReaderAnchor) {
+                val terminal = ReaderChapterCompletion.terminalIndex(
+                    pages.map {
+                        ReaderChapterCompletion.Page(
+                            it.index,
+                            it.isHidden,
+                            it.status == Page.State.READY && it.isWebtoonImageReady,
+                        )
+                    },
+                )
+                val lastPart = chapter.pages?.lastOrNull { it.originalPage.index == terminal && !it.isHidden }
+                val terminalPosition = lastPart?.let { adapter.items.indexOf(it) } ?: -1
+                val endVisible = layoutManager.findLastEndVisibleItemPosition()
+                if (ReaderChapterCompletion.reachesTerminal(terminalPosition, endVisible)) {
+                    positions.remove(key)
+                    return
+                }
+            }
+            val anchor = layoutManager.readingPosition()?.takeIf { it.key.chapterId == key.chapterId } ?: return
+            val original = pages.firstOrNull { it.index == anchor.key.pageIndex } ?: return
+            val progress = chapter.chapter.last_page_read
+            if (progress !in pages.indices) return
+            positions.write(
+                key,
+                ReaderScrollPositionStore.Position(
+                    anchor,
+                    progress,
+                    pages.size,
+                    chapter.chapter.read,
+                    ReaderScrollPositionStore.hashPageUrl(original.url),
+                ),
+            )
+        } catch (exception: Exception) {
+            logcat(LogPriority.ERROR, exception) { "Could not checkpoint reader position" }
+        }
+    }
+
+    private fun restoreSavedPosition(chapter: ReaderChapter): Boolean {
+        if (layoutManager.isRestoringReaderAnchor) return true // Recreation state is newer than a disk checkpoint.
+        return try {
+            val key = positionChapter(chapter) ?: return false
+            val saved = positions.read(key) ?: return false
+            val pages = chapter.pages?.filterNot { it is InsertPage } ?: return false
+            val original = pages.firstOrNull { it.index == saved.anchor.key.pageIndex }
+            val compatible = original != null && saved.matches(
+                chapter.chapter.last_page_read,
+                pages.size,
+                chapter.chapter.read,
+                original.url,
+            )
+            if (compatible) {
+                layoutManager.restoreReadingPosition(saved.anchor)
+                true
+            } else {
+                if (mayWritePosition()) positions.remove(key)
+                false
+            }
+        } catch (exception: Exception) {
+            logcat(LogPriority.ERROR, exception) { "Could not restore reader position" }
+            false
+        }
+    }
 
     /**
      * Distance to scroll when the user taps on one side of the recycler view.
@@ -205,6 +319,8 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * Destroys this viewer. Called when leaving the reader or swapping viewers.
      */
     override fun destroy() {
+        recycler.removeCallbacks(positionCheckpoint)
+        saveReadingPosition()
         super.destroy()
         scope.cancel()
     }
@@ -248,14 +364,16 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * Tells this viewer to set the given [chapters] as active.
      */
     override fun setChapters(chapters: ViewerChapters) {
+        if (adapter.currentChapter?.chapter?.id != chapters.currChapter.chapter.id) saveReadingPosition()
         val forceTransition = config.alwaysShowChapterTransition || currentPage is ChapterTransition
         adapter.setChapters(chapters, forceTransition)
 
         if (recycler.isGone) {
             logcat { "Recycler first layout" }
             val pages = chapters.currChapter.pages ?: return
-            if (!layoutManager.isRestoringReaderAnchor) {
-                moveToPage(pages[min(chapters.currChapter.requestedPage, pages.lastIndex)])
+            if (pages.isEmpty()) return
+            if (!restoreSavedPosition(chapters.currChapter)) {
+                positionAtPage(pages[chapters.currChapter.requestedPage.coerceIn(0, pages.lastIndex)], explicit = false)
             }
             recycler.isVisible = true
         }
@@ -265,9 +383,26 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * Tells this viewer to move to the given [page].
      */
     override fun moveToPage(page: ReaderPage) {
-        layoutManager.cancelReaderAnchorRestoration()
+        positionAtPage(page, explicit = true)
+    }
+
+    private fun positionAtPage(page: ReaderPage, explicit: Boolean) {
         val position = adapter.items.indexOf(page)
         if (position != -1) {
+            if (explicit) {
+                layoutManager.discardPendingHierarchyPosition()
+                forgetSavedPosition(page.chapter)
+                val generation = ++navigationGeneration
+                pendingManualLayout = true
+                recycler.doOnNextLayout {
+                    if (scope.isActive && generation == navigationGeneration) {
+                        pendingManualLayout = false
+                        checkpointPositionLater()
+                    }
+                }
+            } else {
+                layoutManager.cancelReaderAnchorRestoration()
+            }
             layoutManager.scrollToPositionWithOffset(position, 0)
             if (layoutManager.findLastEndVisibleItemPosition() == -1) {
                 onScrolled(pos = position)
@@ -310,6 +445,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
                 is ChapterTransition -> onTransitionSelected(item)
             }
         }
+        checkpointPositionLater()
     }
 
     /**

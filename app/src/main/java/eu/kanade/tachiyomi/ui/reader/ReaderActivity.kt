@@ -232,6 +232,7 @@ class ReaderActivity : BaseActivity() {
     }
 
     override fun onPause() {
+        viewModel.state.value.viewer?.saveReadingPosition()
         viewModel.flushReadTimer()
         super.onPause()
     }

@@ -21,6 +21,9 @@ interface Viewer {
      */
     fun destroy() {}
 
+    /** Checkpoint finer reading geometry without changing the chapter's completion/progress fields. */
+    fun saveReadingPosition() {}
+
     /**
      * Tells this viewer to set the given [chapters] as active.
      */
