@@ -6,9 +6,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import eu.kanade.presentation.manga.components.MangaChapterListItem
 import eu.kanade.tachiyomi.data.download.model.Download
@@ -137,6 +139,77 @@ class ChapterPressSyncTest {
 
     @Test fun downloadSwipeActionChangesKeepTheHeldPress() = heldPressWithSwipeUpdates(sync = true, downloadSwipe = true)
 
+    @Test fun stationaryPressWithSmallRealPointerMovesIsRecognized() = pressWhileOtherRowsChange(changeRows = false)
+
+    @Test fun otherRowsReceivingMetadataDoNotCancelTheStationaryPressedChapter() = pressWhileOtherRowsChange(changeRows = true)
+
+    private fun pressWhileOtherRowsChange(changeRows: Boolean) {
+        val rows = mutableStateOf((1L..4L).map { Row(it) })
+        val selected = mutableStateOf(emptySet<Long>())
+        val longPresses = mutableListOf<Long>()
+        var clicks = 0
+        compose.setContent {
+            MaterialTheme {
+                LazyColumn {
+                    items(rows.value, key = { "chapter-${it.id}" }) { row ->
+                        MangaChapterListItem(
+                            chapterId = row.id,
+                            title = "Chapter ${row.id}",
+                            date = if (row.details) "Today" else null,
+                            readProgress = null,
+                            scanlator = null,
+                            read = false,
+                            bookmark = false,
+                            selected = row.id in selected.value,
+                            downloadIndicatorEnabled = true,
+                            downloadStateProvider = { Download.State.NOT_DOWNLOADED },
+                            downloadProgressProvider = { 0 },
+                            chapterSwipeStartAction = LibraryPreferences.ChapterSwipeAction.ToggleBookmark,
+                            chapterSwipeEndAction = LibraryPreferences.ChapterSwipeAction.ToggleRead,
+                            onLongClick = {
+                                longPresses += row.id
+                                selected.value += row.id
+                            },
+                            onClick = { clicks++ },
+                            onDownloadClick = {},
+                            onChapterSwipe = {},
+                            modifier = Modifier.testTag("chapter-${row.id}"),
+                        )
+                    }
+                }
+            }
+        }
+        compose.mainClock.autoAdvance = false
+        val chapter = compose.onNodeWithTag("chapter-4")
+        val originalPoint = chapter.fetchSemanticsNode().boundsInRoot.center
+        val root = compose.onRoot()
+        root.performTouchInput { down(originalPoint) }
+        repeat(3) { index ->
+            compose.mainClock.advanceTimeBy(100)
+            if (changeRows) {
+                compose.runOnUiThread {
+                    rows.value = rows.value.map { if (it.id == index + 1L) it.copy(details = true) else it }
+                }
+            }
+            compose.mainClock.advanceTimeByFrame()
+            // Real fingers emit tiny movements. Keep the screen coordinate fixed even if rows move.
+            root.performTouchInput { moveTo(originalPoint + Offset(0f, if (index % 2 == 0) 1f else 0f)) }
+        }
+        compose.mainClock.advanceTimeBy(400)
+        compose.runOnIdle {
+            assertEquals("Metadata above the pressed row must not cancel its stationary finger", listOf(4L), longPresses)
+            assertTrue(4L in selected.value)
+        }
+        root.performTouchInput { up() }
+        compose.runOnUiThread { rows.value = rows.value.reversed() }
+        compose.mainClock.advanceTimeBy(100)
+        compose.runOnIdle {
+            assertEquals(listOf(4L), longPresses)
+            assertEquals(0, clicks)
+            assertTrue(4L in selected.value)
+        }
+    }
+
     private fun heldPressWithSwipeUpdates(sync: Boolean, downloadSwipe: Boolean = false) {
         val row = mutableStateOf(Row(1))
         val selected = mutableStateOf(false)
@@ -222,5 +295,6 @@ class ChapterPressSyncTest {
         val read: Boolean = false,
         val bookmark: Boolean = false,
         val downloadState: Download.State = Download.State.DOWNLOADING,
+        val details: Boolean = false,
     )
 }
