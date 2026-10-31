@@ -8,7 +8,9 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.WebtoonLayoutManager
 import eu.kanade.tachiyomi.data.database.models.ChapterImpl
+import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.filter.ReaderImageRules
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
@@ -106,7 +108,16 @@ class WebtoonRotationPositionTest {
                 )
             }
             val chapter = ReaderChapter(ChapterImpl().apply { id = 47; manga_id = 72 })
-            chapter.state = ReaderChapter.State.Loaded(listOf(ReaderPage(0).apply { this.chapter = chapter }))
+            chapter.state = ReaderChapter.State.Loaded(
+                listOf(
+                    ReaderPage(0).apply {
+                        this.chapter = chapter
+                        status = Page.State.READY
+                        displayDimensions = 720 to 12000
+                        markWebtoonImageReady(ReaderImageRules.revision.value)
+                    },
+                ),
+            )
             adapter.setChapters(ViewerChapters(chapter, null, null), false)
             recycler = WebtoonRecyclerView(this).apply {
                 layoutManager = WebtoonLayoutManager(this@Host)
