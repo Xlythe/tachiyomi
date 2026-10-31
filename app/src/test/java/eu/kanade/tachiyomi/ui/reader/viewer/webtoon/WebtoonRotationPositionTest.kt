@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
@@ -27,6 +28,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.ConscryptMode
 
@@ -138,6 +140,7 @@ class WebtoonRotationPositionTest {
 
         fun layoutReader() {
             repeat(3) {
+                shadowOf(Looper.getMainLooper()).idle()
                 recycler.measure(
                     View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),

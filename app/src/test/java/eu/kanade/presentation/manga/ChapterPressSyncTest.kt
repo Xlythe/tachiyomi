@@ -197,7 +197,11 @@ class ChapterPressSyncTest {
         }
         compose.mainClock.advanceTimeBy(400)
         compose.runOnIdle {
-            assertEquals("Metadata above the pressed row must not cancel its stationary finger", listOf(4L), longPresses)
+            assertEquals(
+                "Metadata above the pressed row must not cancel its stationary finger",
+                listOf(4L),
+                longPresses,
+            )
             assertTrue(4L in selected.value)
         }
         root.performTouchInput { up() }
