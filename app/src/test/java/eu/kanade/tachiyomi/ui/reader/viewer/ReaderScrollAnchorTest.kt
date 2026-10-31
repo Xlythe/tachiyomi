@@ -1,8 +1,8 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
@@ -43,7 +43,9 @@ class ReaderScrollAnchorTest {
         repeat(100) {
             val height = if (it % 2 == 0) 21333 else 12000
             val viewport = if (it % 2 == 0) 720 else 1280
-            anchor = requireNotNull(ReaderScrollAnchor.capture(key, anchor.imageTop(height, 0, viewport), height, 0, viewport))
+            anchor = requireNotNull(
+                ReaderScrollAnchor.capture(key, anchor.imageTop(height, 0, viewport), height, 0, viewport),
+            )
             assertEquals(0.5, anchor.fraction, 0.0001)
         }
     }

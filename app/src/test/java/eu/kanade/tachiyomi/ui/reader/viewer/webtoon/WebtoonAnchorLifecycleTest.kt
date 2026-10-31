@@ -194,5 +194,6 @@ class WebtoonAnchorLifecycleTest {
     private val WebtoonRotationPositionTest.Host.manager: WebtoonLayoutManager
         get() = recycler.layoutManager as WebtoonLayoutManager
     private val WebtoonRotationPositionTest.Host.adapter: WebtoonAdapter get() = recycler.adapter as WebtoonAdapter
-    private val WebtoonRotationPositionTest.Host.page: ReaderPage get() = adapter.items.filterIsInstance<ReaderPage>().first()
+    private val WebtoonRotationPositionTest.Host.page: ReaderPage
+        get() = adapter.items.filterIsInstance<ReaderPage>().first()
 }

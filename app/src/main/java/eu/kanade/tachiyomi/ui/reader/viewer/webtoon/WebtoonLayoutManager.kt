@@ -56,7 +56,11 @@ class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
         super.onRestoreInstanceState(state.getParcelable<Parcelable>("parent"))
         readerAnchor = runCatching {
             ReaderScrollAnchor(
-                ReaderScrollAnchor.Key(state.getLong("chapter", -1), state.getInt("page", -1), state.getInt("part", -1)),
+                ReaderScrollAnchor.Key(
+                    state.getLong("chapter", -1),
+                    state.getInt("page", -1),
+                    state.getInt("part", -1),
+                ),
                 state.getDouble("fraction", Double.NaN),
                 state.getDouble("viewport", Double.NaN),
             )
@@ -67,10 +71,14 @@ class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
     }
 
     internal fun cancelReaderAnchorRestoration() {
-        val wasRestoring = readerAnchor != null
         readerAnchor = null
         requestedAnchorPosition = NO_POSITION
         appliedAnchor = null
+    }
+
+    private fun finishReaderAnchorRestoration() {
+        val wasRestoring = readerAnchor != null
+        cancelReaderAnchorRestoration()
         if (wasRestoring) onReaderAnchorRestored?.invoke()
     }
 
@@ -112,7 +120,7 @@ class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
         if (chapter.isEmpty()) return // Chapter data has not arrived; keep the saved content point.
         val visible = chapter.filterNot { it.page.isHidden }
         if (visible.isEmpty()) {
-            cancelReaderAnchorRestoration()
+            finishReaderAnchorRestoration()
             return
         }
         val exact = visible.firstOrNull { it.key == anchor.key }
@@ -141,7 +149,7 @@ class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
         val applied = AppliedAnchor(target.position, view.width, imageHeight, offset)
         if (abs(decoratedTop - paddingTop - offset) <= 1 || appliedAnchor == applied) {
             // A repeated application may be clamped at a chapter edge. Do not fight the layout indefinitely.
-            cancelReaderAnchorRestoration()
+            finishReaderAnchorRestoration()
         } else {
             appliedAnchor = applied
             super.scrollToPositionWithOffset(target.position, offset)

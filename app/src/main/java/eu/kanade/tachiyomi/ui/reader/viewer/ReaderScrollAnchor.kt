@@ -22,7 +22,13 @@ internal data class ReaderScrollAnchor(val key: Key, val fraction: Double, val v
     }
 
     companion object {
-        fun capture(key: Key, imageTop: Int, imageHeight: Int, viewportTop: Int, viewportHeight: Int): ReaderScrollAnchor? {
+        fun capture(
+            key: Key,
+            imageTop: Int,
+            imageHeight: Int,
+            viewportTop: Int,
+            viewportHeight: Int,
+        ): ReaderScrollAnchor? {
             if (imageHeight <= 0 || viewportHeight <= 0) return null
             val bottom = imageTop.toDouble() + imageHeight
             val viewportBottom = viewportTop.toDouble() + viewportHeight
