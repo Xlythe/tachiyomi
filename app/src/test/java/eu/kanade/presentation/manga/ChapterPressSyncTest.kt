@@ -20,11 +20,13 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.ConscryptMode
 import tachiyomi.domain.library.service.LibraryPreferences
 
 /** Real pointer input and recomposition, without an emulator or an application database. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
+@ConscryptMode(ConscryptMode.Mode.OFF) // UI-only sandbox; this Windows host has no Conscrypt JNI library.
 class ChapterPressSyncTest {
     @get:Rule val compose = createAndroidComposeRule<ReaderUiTestActivity>()
 

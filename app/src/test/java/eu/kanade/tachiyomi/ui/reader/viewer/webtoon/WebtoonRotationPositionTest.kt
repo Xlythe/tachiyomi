@@ -28,6 +28,7 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.ConscryptMode
 
 /**
  * Exercises Android view-state recreation with the production recycler, adapter and layout manager.
@@ -35,6 +36,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
+@ConscryptMode(ConscryptMode.Mode.OFF) // No TLS is exercised by the view-state fixture.
 class WebtoonRotationPositionTest {
     @After fun cleanup() {
         unmockkAll()
