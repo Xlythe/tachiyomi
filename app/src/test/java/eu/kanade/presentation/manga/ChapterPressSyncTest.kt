@@ -28,6 +28,45 @@ import tachiyomi.domain.library.service.LibraryPreferences
 class ChapterPressSyncTest {
     @get:Rule val compose = createAndroidComposeRule<ReaderUiTestActivity>()
 
+    @Test fun aHeldPressWithoutSyncUpdatesFiresOnce() {
+        var longPresses = 0
+        var clicks = 0
+        compose.setContent {
+            MaterialTheme {
+                MangaChapterListItem(
+                    chapterId = 1,
+                    title = "Chapter 1",
+                    date = null,
+                    readProgress = "Progress 0",
+                    scanlator = null,
+                    read = false,
+                    bookmark = false,
+                    selected = false,
+                    downloadIndicatorEnabled = true,
+                    downloadStateProvider = { Download.State.DOWNLOADING },
+                    downloadProgressProvider = { 0 },
+                    chapterSwipeStartAction = LibraryPreferences.ChapterSwipeAction.Disabled,
+                    chapterSwipeEndAction = LibraryPreferences.ChapterSwipeAction.Disabled,
+                    onLongClick = { longPresses++ },
+                    onClick = { clicks++ },
+                    onDownloadClick = {},
+                    onChapterSwipe = {},
+                    modifier = Modifier.testTag("chapter-1"),
+                )
+            }
+        }
+        compose.mainClock.autoAdvance = false
+        val chapter = compose.onNodeWithTag("chapter-1")
+        chapter.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(700)
+        compose.runOnIdle { assertEquals("Control: the host must execute a real held-press timeout", 1, longPresses) }
+        chapter.performTouchInput { up() }
+        compose.runOnIdle {
+            assertEquals(1, longPresses)
+            assertEquals(0, clicks)
+        }
+    }
+
     @Test fun syncingRowDoesNotCancelLongPressOrClearItsSelection() {
         val rows = mutableStateOf(listOf(Row(1), Row(2)))
         val selected = mutableStateOf(emptySet<Long>())
