@@ -24,6 +24,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import tachiyomi.core.util.system.logcat
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -94,6 +95,9 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         recycler.itemAnimator = null
         recycler.layoutManager = layoutManager
         recycler.adapter = adapter
+        layoutManager.onReaderAnchorRestored = {
+            recycler.post { if (scope.isActive) onScrolled() }
+        }
         recycler.addOnScrollListener(
             object : RecyclerView.OnScrollListener() {
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
@@ -250,7 +254,9 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
         if (recycler.isGone) {
             logcat { "Recycler first layout" }
             val pages = chapters.currChapter.pages ?: return
-            moveToPage(pages[min(chapters.currChapter.requestedPage, pages.lastIndex)])
+            if (!layoutManager.isRestoringReaderAnchor) {
+                moveToPage(pages[min(chapters.currChapter.requestedPage, pages.lastIndex)])
+            }
             recycler.isVisible = true
         }
     }
@@ -259,6 +265,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
      * Tells this viewer to move to the given [page].
      */
     override fun moveToPage(page: ReaderPage) {
+        layoutManager.cancelReaderAnchorRestoration()
         val position = adapter.items.indexOf(page)
         if (position != -1) {
             layoutManager.scrollToPositionWithOffset(position, 0)
@@ -271,6 +278,7 @@ class WebtoonViewer(val activity: ReaderActivity, val isContinuous: Boolean = tr
     }
 
     fun onScrolled(pos: Int? = null) {
+        if (layoutManager.isRestoringReaderAnchor) return
         val position = pos ?: layoutManager.findLastEndVisibleItemPosition()
         val item = adapter.items.getOrNull(position)
         // End-visible selection can land on the transition after a short cropped final page.

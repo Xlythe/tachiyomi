@@ -11,6 +11,8 @@ import android.view.animation.DecelerateInterpolator
 import androidx.core.animation.doOnEnd
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.WebtoonLayoutManager
+import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.reader.viewer.GestureDetectorWithLongTap
 import kotlin.math.abs
 
@@ -42,6 +44,11 @@ class WebtoonRecyclerView @JvmOverloads constructor(
     var tapListener: ((MotionEvent) -> Unit)? = null
     var longTapListener: ((MotionEvent) -> Boolean)? = null
 
+    init {
+        // Without a stable ID Android never saves this reader's layout-manager state.
+        id = R.id.reader_webtoon
+    }
+
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         halfWidth = MeasureSpec.getSize(widthSpec) / 2
         halfHeight = MeasureSpec.getSize(heightSpec) / 2
@@ -67,6 +74,9 @@ class WebtoonRecyclerView @JvmOverloads constructor(
 
     override fun onScrollStateChanged(state: Int) {
         super.onScrollStateChanged(state)
+        if (state == SCROLL_STATE_DRAGGING) {
+            (layoutManager as? WebtoonLayoutManager)?.cancelReaderAnchorRestoration()
+        }
         val layoutManager = layoutManager
         val visibleItemCount = layoutManager?.childCount ?: 0
         val totalItemCount = layoutManager?.itemCount ?: 0
@@ -187,6 +197,7 @@ class WebtoonRecyclerView @JvmOverloads constructor(
     }
 
     fun onScaleBegin() {
+        (layoutManager as? WebtoonLayoutManager)?.cancelReaderAnchorRestoration()
         if (detector.isDoubleTapping) {
             detector.isQuickScaling = true
         }
@@ -212,6 +223,7 @@ class WebtoonRecyclerView @JvmOverloads constructor(
 
         fun onDoubleTapConfirmed(ev: MotionEvent) {
             if (!isZooming && doubleTapZoom) {
+                (layoutManager as? WebtoonLayoutManager)?.cancelReaderAnchorRestoration()
                 if (scaleX != DEFAULT_RATE) {
                     zoom(currentScale, DEFAULT_RATE, x, 0f, y, 0f)
                     layoutParams.height = originalHeight

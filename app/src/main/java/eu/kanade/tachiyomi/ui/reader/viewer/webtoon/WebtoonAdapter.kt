@@ -17,6 +17,10 @@ import eu.kanade.tachiyomi.util.system.createReaderThemeContext
  */
 class WebtoonAdapter(val viewer: WebtoonViewer) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
+    init {
+        stateRestorationPolicy = StateRestorationPolicy.PREVENT_WHEN_EMPTY
+    }
+
     /**
      * List of currently set items.
      */
