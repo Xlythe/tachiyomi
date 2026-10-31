@@ -129,8 +129,37 @@ class WebtoonAnchorLifecycleTest {
         original.get().layoutReader()
         val restored = create(1280, 720, save(original), loading = true).get()
         assertTrue(restored.manager.isRestoringReaderAnchor)
+        var completedRestores = 0
+        restored.manager.onReaderAnchorRestored = { completedRestores++ }
         restored.recycler.onScrollStateChanged(RecyclerView.SCROLL_STATE_DRAGGING)
         assertFalse(restored.manager.isRestoringReaderAnchor)
+        assertEquals("User cancellation must not emit completion for the old viewport", 0, completedRestores)
+    }
+
+    @Test fun anAllHiddenChapterDoesNotRemainStuckWaitingForAnImage() {
+        val original = create(720, 1280)
+        original.get().manager.scrollToPositionWithOffset(1, -6000)
+        original.get().layoutReader()
+        val restored = create(1280, 720, save(original), hideFirst = true).get()
+        assertTrue(restored.page.isHidden)
+        assertFalse(restored.manager.isRestoringReaderAnchor)
+    }
+
+    @Test fun differentToolbarAndInsetPaddingKeepsTheSameImagePoint() {
+        val original = create(720, 1280, topPadding = 24)
+        original.get().manager.scrollToPositionWithOffset(1, -6000)
+        original.get().layoutReader()
+        val restored = create(1280, 720, save(original), topPadding = 80).get()
+        val image = requireNotNull(restored.recycler.findViewHolderForAdapterPosition(1)).itemView
+        assertEquals(0.5, (80 - image.top).toDouble() / image.height, 0.001)
+    }
+
+    @Test fun processedImageGeometryUsesTheDisplayedHeight() {
+        val original = create(720, 1280, renderedHeight = 6000)
+        original.get().manager.scrollToPositionWithOffset(1, -3000)
+        original.get().layoutReader()
+        val restored = create(1280, 720, save(original), renderedHeight = 6000).get()
+        assertEquals(0.5, restored.fraction(), 0.001)
     }
 
     private fun create(
@@ -141,13 +170,17 @@ class WebtoonAnchorLifecycleTest {
         twoPages: Boolean = false,
         hideFirst: Boolean = false,
         split: Boolean = false,
+        topPadding: Int = 0,
+        renderedHeight: Int = 12000,
     ): ActivityController<WebtoonRotationPositionTest.Host> {
         WebtoonRotationPositionTest.Host.width = width
         WebtoonRotationPositionTest.Host.height = height
         val controller = Robolectric.buildActivity(WebtoonRotationPositionTest.Host::class.java).create(saved).start()
         controllers += controller
         val host = controller.get()
+        host.recycler.setPadding(0, topPadding, 0, topPadding)
         val first = host.page
+        first.displayDimensions = 720 to renderedHeight
         val chapter = first.chapter
         val pages = mutableListOf(first)
         if (twoPages) {
@@ -168,7 +201,7 @@ class WebtoonAnchorLifecycleTest {
             val imageHeight = when {
                 page == null || page.isHidden -> 0
                 page.status != Page.State.READY -> height
-                else -> (12000L * width / 720).toInt()
+                else -> (renderedHeight.toLong() * width / 720).toInt()
             }
             firstArg<RecyclerView.ViewHolder>().itemView.layoutParams = RecyclerView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
