@@ -248,6 +248,8 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.16.1")
     testImplementation(platform(compose.bom))
     testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation(androidx.test.ext)
+    testImplementation("androidx.test:core:1.7.0")
     testRuntimeOnly("org.junit.vintage:junit-vintage-engine:6.0.1")
     androidTestImplementation(androidx.test.ext)
     androidTestImplementation("androidx.test:runner:1.7.0")
