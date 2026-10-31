@@ -1,10 +1,8 @@
 package eu.kanade.presentation.manga.components
 
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +30,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -43,6 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -90,6 +91,7 @@ fun MangaChapterListItem(
 
     val updatedOnLongClick by rememberUpdatedState(onLongClick)
     val updatedOnClick by rememberUpdatedState(onClick)
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     val textAlpha = if (read) ReadItemAlpha else 1f
     val textSubtitleAlpha = if (read) ReadItemAlpha else SecondaryItemAlpha
@@ -140,24 +142,13 @@ fun MangaChapterListItem(
             Row(
                 modifier = modifier
                     .selectedBackground(selected)
+                    .onGloballyPositioned { coordinates = it }
                     .pointerInput(chapterId) {
-                        detectTapGestures(
+                        detectChapterItemGestures(
+                            interactionSource = interactionSource,
+                            positionInWindow = { point -> coordinates?.takeIf { it.isAttached }?.localToWindow(point) },
                             onLongPress = { updatedOnLongClick() },
                             onTap = { updatedOnClick() },
-                            onPress = {
-                                val press = PressInteraction.Press(it)
-                                interactionSource.emit(press)
-                                val released = try {
-                                    tryAwaitRelease()
-                                } catch (e: Exception) {
-                                    false
-                                }
-                                if (released) {
-                                    interactionSource.emit(PressInteraction.Release(press))
-                                } else {
-                                    interactionSource.emit(PressInteraction.Cancel(press))
-                                }
-                            },
                         )
                     }
                     .indication(interactionSource, LocalIndication.current)
