@@ -21,6 +21,7 @@ internal suspend fun PointerInputScope.detectChapterItemGestures(
     awaitEachGesture {
         val down = awaitFirstDown()
         val origin = positionInWindow(down.position) ?: return@awaitEachGesture
+        println("CHAPTER_PRESS down local=${down.position} window=$origin")
         down.consume()
         val press = PressInteraction.Press(down.position)
         interactionSource.tryEmit(press)
@@ -31,6 +32,7 @@ internal suspend fun PointerInputScope.detectChapterItemGestures(
             }
             when (end) {
                 null -> {
+                    println("CHAPTER_PRESS long timeout")
                     onLongPress()
                     // Match normal long-click semantics: consume the rest of this gesture, never emit a tap.
                     do {
@@ -64,8 +66,12 @@ private suspend fun AwaitPointerEventScope.awaitChapterPressEnd(
     while (true) {
         val event = awaitPointerEvent(PointerEventPass.Main)
         val change = event.changes.firstOrNull { it.id == pointer } ?: return ChapterPressEnd.CANCELLED
-        if (event.changes.size != 1 || event.changes.any { it.isConsumed }) return ChapterPressEnd.CANCELLED
+        if (event.changes.size != 1 || event.changes.any { it.isConsumed }) {
+            println("CHAPTER_PRESS consumed main")
+            return ChapterPressEnd.CANCELLED
+        }
         val position = positionInWindow(change.position) ?: return ChapterPressEnd.CANCELLED
+        println("CHAPTER_PRESS move local=${change.position} window=$position origin=$origin size=$size")
         if ((position - origin).getDistance() > viewConfiguration.touchSlop) return ChapterPressEnd.CANCELLED
         if (change.changedToUpIgnoreConsumed()) {
             val inside = change.position.x in 0f..size.width.toFloat() && change.position.y in 0f..size.height.toFloat()
@@ -74,6 +80,9 @@ private suspend fun AwaitPointerEventScope.awaitChapterPressEnd(
         }
         if (!change.pressed) return ChapterPressEnd.CANCELLED
         // A real list scroll or swipe wins even if it consumed the event after our main-pass observation.
-        if (awaitPointerEvent(PointerEventPass.Final).changes.any { it.isConsumed }) return ChapterPressEnd.CANCELLED
+        if (awaitPointerEvent(PointerEventPass.Final).changes.any { it.isConsumed }) {
+            println("CHAPTER_PRESS consumed final")
+            return ChapterPressEnd.CANCELLED
+        }
     }
 }
