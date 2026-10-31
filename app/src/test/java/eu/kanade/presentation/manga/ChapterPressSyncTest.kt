@@ -131,5 +131,89 @@ class ChapterPressSyncTest {
         }
     }
 
-    private data class Row(val id: Long, val progress: Int = 0, val read: Boolean = false)
+    @Test fun defaultSwipesAllowAHeldPressWithoutUpdates() = heldPressWithSwipeUpdates(sync = false)
+
+    @Test fun readBookmarkAndDownloadChangesWithDefaultSwipesKeepTheHeldPress() = heldPressWithSwipeUpdates(sync = true)
+
+    @Test fun downloadSwipeActionChangesKeepTheHeldPress() = heldPressWithSwipeUpdates(sync = true, downloadSwipe = true)
+
+    private fun heldPressWithSwipeUpdates(sync: Boolean, downloadSwipe: Boolean = false) {
+        val row = mutableStateOf(Row(1))
+        val selected = mutableStateOf(false)
+        var longPresses = 0
+        var clicks = 0
+        var swipes = 0
+        compose.setContent {
+            MaterialTheme {
+                val current = row.value
+                MangaChapterListItem(
+                    chapterId = current.id,
+                    title = "Chapter ${current.id}",
+                    date = null,
+                    readProgress = if (current.read) null else "Progress ${current.progress}",
+                    scanlator = null,
+                    read = current.read,
+                    bookmark = current.bookmark,
+                    selected = selected.value,
+                    downloadIndicatorEnabled = true,
+                    downloadStateProvider = { current.downloadState },
+                    downloadProgressProvider = { current.progress },
+                    chapterSwipeStartAction = if (downloadSwipe) {
+                        LibraryPreferences.ChapterSwipeAction.Download
+                    } else {
+                        LibraryPreferences.ChapterSwipeAction.ToggleBookmark
+                    },
+                    chapterSwipeEndAction = LibraryPreferences.ChapterSwipeAction.ToggleRead,
+                    onLongClick = { longPresses++; selected.value = true },
+                    onClick = { clicks++ },
+                    onDownloadClick = {},
+                    onChapterSwipe = { swipes++ },
+                    modifier = Modifier.testTag("chapter-1"),
+                )
+            }
+        }
+        compose.mainClock.autoAdvance = false
+        val chapter = compose.onNodeWithTag("chapter-1")
+        chapter.performTouchInput { down(center) }
+        repeat(3) { revision ->
+            compose.mainClock.advanceTimeBy(100)
+            if (sync) {
+                compose.runOnUiThread {
+                    row.value = row.value.copy(
+                        progress = 25 * (revision + 1),
+                        read = revision == 2,
+                        bookmark = revision > 0,
+                        downloadState = when (revision) {
+                            0 -> Download.State.QUEUE
+                            1 -> Download.State.DOWNLOADING
+                            else -> Download.State.DOWNLOADED
+                        },
+                    )
+                }
+            }
+            compose.mainClock.advanceTimeByFrame()
+        }
+        compose.mainClock.advanceTimeBy(400)
+        compose.runOnIdle {
+            assertEquals("The original chapter must receive one long click despite live metadata/action changes", 1, longPresses)
+            assertTrue(selected.value)
+        }
+        chapter.performTouchInput { up() }
+        compose.runOnUiThread { row.value = row.value.copy(progress = 100, read = true, bookmark = false) }
+        compose.mainClock.advanceTimeBy(200)
+        compose.runOnIdle {
+            assertEquals(1, longPresses)
+            assertEquals(0, clicks)
+            assertEquals(0, swipes)
+            assertTrue(selected.value)
+        }
+    }
+
+    private data class Row(
+        val id: Long,
+        val progress: Int = 0,
+        val read: Boolean = false,
+        val bookmark: Boolean = false,
+        val downloadState: Download.State = Download.State.DOWNLOADING,
+    )
 }
