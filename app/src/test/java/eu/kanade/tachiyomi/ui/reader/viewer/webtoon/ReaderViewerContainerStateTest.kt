@@ -137,6 +137,7 @@ class ReaderViewerContainerStateTest {
                 putInt("value", value)
             }
         }
+
         @Suppress("DEPRECATION")
         override fun onRestoreInstanceState(state: Parcelable?) {
             if (state is Bundle) {
