@@ -137,11 +137,13 @@ class ChapterPressSyncTest {
 
     @Test fun readBookmarkAndDownloadChangesWithDefaultSwipesKeepTheHeldPress() = heldPressWithSwipeUpdates(sync = true)
 
-    @Test fun downloadSwipeActionChangesKeepTheHeldPress() = heldPressWithSwipeUpdates(sync = true, downloadSwipe = true)
+    @Test fun downloadSwipeActionChangesKeepTheHeldPress() =
+        heldPressWithSwipeUpdates(sync = true, downloadSwipe = true)
 
     @Test fun stationaryPressWithSmallRealPointerMovesIsRecognized() = pressWhileOtherRowsChange(changeRows = false)
 
-    @Test fun otherRowsReceivingMetadataDoNotCancelTheStationaryPressedChapter() = pressWhileOtherRowsChange(changeRows = true)
+    @Test fun otherRowsReceivingMetadataDoNotCancelTheStationaryPressedChapter() =
+        pressWhileOtherRowsChange(changeRows = true)
 
     private fun pressWhileOtherRowsChange(changeRows: Boolean) {
         val rows = mutableStateOf((1L..4L).map { Row(it) })

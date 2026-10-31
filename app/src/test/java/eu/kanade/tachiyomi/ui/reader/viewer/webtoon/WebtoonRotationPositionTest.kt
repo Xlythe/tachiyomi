@@ -150,7 +150,9 @@ class WebtoonRotationPositionTest {
         }
 
         fun fraction(): Double {
-            val page = requireNotNull(recycler.findViewHolderForAdapterPosition(1)) { "Tall page must be attached" }.itemView
+            val page = requireNotNull(recycler.findViewHolderForAdapterPosition(1)) {
+                "Tall page must be attached"
+            }.itemView
             return -page.top.toDouble() / page.height
         }
     }
