@@ -48,6 +48,7 @@ internal suspend fun PointerInputScope.detectChapterItemGestures(
                 ChapterPressEnd.UP_OUTSIDE, ChapterPressEnd.CANCELLED -> Unit
             }
         } finally {
+            println("CHAPTER_PRESS finished released=$released")
             // tryEmit also delivers cancellation when the keyed row is removed and its coroutine is cancelled.
             interactionSource.tryEmit(
                 if (released) PressInteraction.Release(press) else PressInteraction.Cancel(press),

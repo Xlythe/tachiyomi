@@ -84,7 +84,7 @@ class ChapterPressCancellationTest {
         val fixture = Fixture()
         fixture.down()
         compose.mainClock.advanceTimeBy(100)
-        compose.runOnUiThread { fixture.rows.value = fixture.rows.value.reversed() }
+        compose.runOnUiThread { fixture.rows.value = listOf(3L, 1L, 2L) }
         compose.mainClock.advanceTimeBy(700)
         compose.runOnIdle { assertEquals(listOf(2L), fixture.longPresses) }
         compose.onRoot().performTouchInput { up() }
@@ -124,8 +124,11 @@ class ChapterPressCancellationTest {
                                 chapterSwipeStartAction = LibraryPreferences.ChapterSwipeAction.ToggleBookmark,
                                 chapterSwipeEndAction = LibraryPreferences.ChapterSwipeAction.ToggleRead,
                                 onLongClick = {
-                                    longPresses += id
-                                    selected.value += id
+                                    // MangaScreenModel also rejects IDs no longer present after a sync.
+                                    if (id in rows.value) {
+                                        longPresses += id
+                                        selected.value += id
+                                    }
                                 },
                                 onClick = { clicks += id },
                                 onDownloadClick = {},
