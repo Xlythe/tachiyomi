@@ -126,7 +126,9 @@ class WebtoonLayoutManager(context: Context) : LinearLayoutManager(context) {
         val exact = visible.firstOrNull { it.key == anchor.key }
             ?: visible.firstOrNull { it.key.pageIndex == anchor.key.pageIndex }
         val target = exact ?: visible.firstOrNull { it.key.pageIndex > anchor.key.pageIndex } ?: visible.last()
-        val targetAnchor = if (exact != null) anchor else {
+        val targetAnchor = if (exact != null) {
+            anchor
+        } else {
             // Never reveal a hidden image to satisfy a saved offset; use the next visible page or previous end.
             val end = if (target.key.pageIndex < anchor.key.pageIndex) 1.0 else 0.0
             ReaderScrollAnchor(target.key, end, end)
