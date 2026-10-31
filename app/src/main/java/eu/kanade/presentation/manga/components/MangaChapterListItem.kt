@@ -98,6 +98,7 @@ fun MangaChapterListItem(
 
     // Increase touch slop of swipe action to reduce accidental trigger
     val configuration = LocalViewConfiguration.current
+    // Replacing this provider during a live row measurement cancels its suspended pointer input.
     val swipeConfiguration = remember(configuration) {
         object : ViewConfiguration by configuration {
             override val touchSlop: Float = configuration.touchSlop * 3f
