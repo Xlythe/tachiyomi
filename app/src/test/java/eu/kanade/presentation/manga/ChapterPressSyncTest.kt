@@ -164,7 +164,10 @@ class ChapterPressSyncTest {
                         LibraryPreferences.ChapterSwipeAction.ToggleBookmark
                     },
                     chapterSwipeEndAction = LibraryPreferences.ChapterSwipeAction.ToggleRead,
-                    onLongClick = { longPresses++; selected.value = true },
+                    onLongClick = {
+                        longPresses++
+                        selected.value = true
+                    },
                     onClick = { clicks++ },
                     onDownloadClick = {},
                     onChapterSwipe = { swipes++ },
@@ -195,7 +198,11 @@ class ChapterPressSyncTest {
         }
         compose.mainClock.advanceTimeBy(400)
         compose.runOnIdle {
-            assertEquals("The original chapter must receive one long click despite live metadata/action changes", 1, longPresses)
+            assertEquals(
+                "The original chapter must receive one long click despite live metadata/action changes",
+                1,
+                longPresses,
+            )
             assertTrue(selected.value)
         }
         chapter.performTouchInput { up() }
