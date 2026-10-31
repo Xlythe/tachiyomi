@@ -152,7 +152,11 @@ class ReaderViewerContainerStateTest {
         context.resources.getXml(R.layout.reader_activity).use { parser ->
             while (parser.next() != XmlPullParser.END_DOCUMENT) {
                 if (parser.eventType != XmlPullParser.START_TAG) continue
-                val id = parser.getAttributeResourceValue("http://schemas.android.com/apk/res/android", "id", View.NO_ID)
+                val id = parser.getAttributeResourceValue(
+                    "http://schemas.android.com/apk/res/android",
+                    "id",
+                    View.NO_ID,
+                )
                 if (id != R.id.viewer_container) continue
                 val name = parser.name.let { if ('.' in it) it else "android.widget.$it" }
                 return (Class.forName(name).getConstructor(Context::class.java).newInstance(context) as FrameLayout)
