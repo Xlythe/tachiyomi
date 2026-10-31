@@ -3,6 +3,8 @@ package eu.kanade.tachiyomi.ui.reader.viewer.webtoon
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
+import android.os.Parcelable
+import android.util.SparseArray
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -59,6 +61,91 @@ class ReaderViewerContainerStateTest {
             host.layoutReader()
             assertEquals("Late chapter data must not restart a long image", 0.5, host.fraction(), 0.001)
         } finally { recreated.pause().stop().destroy() }
+    }
+
+    @Test fun anotherRecreationWhileDataIsStillLoadingKeepsPendingState() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val initial = productionContainer(context)
+        initial.addView(StatefulViewer(context).apply { value = 37 })
+        val saved = SparseArray<Parcelable>()
+        initial.saveHierarchyState(saved)
+        val waiting = productionContainer(context)
+        waiting.restoreHierarchyState(saved)
+        val savedAgain = SparseArray<Parcelable>()
+        waiting.saveHierarchyState(savedAgain)
+        val resumed = productionContainer(context)
+        resumed.restoreHierarchyState(savedAgain)
+        val viewer = StatefulViewer(context)
+        resumed.addView(viewer)
+        assertEquals(37, viewer.value)
+    }
+
+    @Test fun anUnrelatedLoadingViewDoesNotConsumePendingViewerState() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val initial = productionContainer(context)
+        initial.addView(StatefulViewer(context).apply { value = 37 })
+        val saved = SparseArray<Parcelable>()
+        initial.saveHierarchyState(saved)
+        val resumed = productionContainer(context)
+        resumed.restoreHierarchyState(saved)
+        resumed.addView(View(context))
+        val viewer = StatefulViewer(context)
+        resumed.addView(viewer)
+        assertEquals(37, viewer.value)
+    }
+
+    @Test fun switchingViewersLaterDoesNotReplayAConsumedSavedPosition() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val initial = productionContainer(context)
+        initial.addView(StatefulViewer(context).apply { value = 37 })
+        val saved = SparseArray<Parcelable>()
+        initial.saveHierarchyState(saved)
+        val resumed = productionContainer(context)
+        resumed.restoreHierarchyState(saved)
+        val first = StatefulViewer(context)
+        resumed.addView(first)
+        assertEquals(37, first.value)
+        resumed.removeView(first)
+        val next = StatefulViewer(context).apply { value = 99 }
+        resumed.addView(next)
+        assertEquals(99, next.value)
+    }
+
+    @Test fun anotherReaderModeDiscardsInapplicablePendingState() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val initial = productionContainer(context)
+        initial.addView(StatefulViewer(context).apply { value = 37 })
+        val saved = SparseArray<Parcelable>()
+        initial.saveHierarchyState(saved)
+        val resumed = productionContainer(context)
+        resumed.restoreHierarchyState(saved)
+        val pager = View(context).apply { id = R.id.reader_pager }
+        resumed.addView(pager)
+        resumed.removeView(pager)
+        val next = StatefulViewer(context).apply { value = 99 }
+        resumed.addView(next)
+        assertEquals(99, next.value)
+    }
+
+    private class StatefulViewer(context: Context) : View(context) {
+        var value = 0
+        init { id = R.id.reader_webtoon }
+        override fun onSaveInstanceState(): Parcelable {
+            val parent = super.onSaveInstanceState()
+            return Bundle().apply {
+                putParcelable("parent", parent)
+                putInt("value", value)
+            }
+        }
+        @Suppress("DEPRECATION")
+        override fun onRestoreInstanceState(state: Parcelable?) {
+            if (state is Bundle) {
+                super.onRestoreInstanceState(state.getParcelable<Parcelable>("parent"))
+                value = state.getInt("value")
+            } else {
+                super.onRestoreInstanceState(state)
+            }
+        }
     }
 
     private fun productionContainer(context: Context): FrameLayout {
