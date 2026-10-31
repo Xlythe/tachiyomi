@@ -218,11 +218,8 @@ private fun ReviewPage(
                     choice == ReaderChapterReviewStore.Choice.HIDE -> stringResource(
                         MR.strings.reader_review_explicit_hide,
                     )
-                    reason == ReaderChapterSizePolicy.Reason.DIFFERENT_WIDTH -> stringResource(
-                        MR.strings.reader_review_different_width,
-                    )
-                    reason == ReaderChapterSizePolicy.Reason.SHORTER_HEIGHT -> stringResource(
-                        MR.strings.reader_review_short_height,
+                    reason == ReaderChapterSizePolicy.Reason.WIDER_AND_SHORTER -> stringResource(
+                        MR.strings.reader_review_wider_and_shorter,
                     )
                     page.isHidden -> stringResource(MR.strings.reader_review_saved_rule)
                     else -> stringResource(MR.strings.reader_review_included)

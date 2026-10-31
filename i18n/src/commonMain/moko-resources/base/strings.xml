@@ -953,8 +953,7 @@
     <string name="reader_review_page_number">Page %1$d of %2$d</string>
     <string name="reader_review_restored">Restored in this chapter</string>
     <string name="reader_review_explicit_hide">Excluded in this chapter</string>
-    <string name="reader_review_different_width">Different width from the chapter majority</string>
-    <string name="reader_review_short_height">Shorter than the chapter’s normal pages</string>
+    <string name="reader_review_wider_and_shorter">Wider and shorter than the chapter’s normal pages</string>
     <string name="reader_review_saved_rule">Matched a saved spam rule</string>
     <string name="reader_review_included">Included</string>
     <string name="reader_review_exclude">Exclude</string>

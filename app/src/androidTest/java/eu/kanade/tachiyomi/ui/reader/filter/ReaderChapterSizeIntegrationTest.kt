@@ -9,7 +9,10 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.viewer.forPageVisibility
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -27,6 +30,57 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ReaderChapterSizeIntegrationTest {
+    @Test fun splitPagesObserveTheirOriginalVisibilityWithoutRespondingToOtherPages() = runBlocking {
+        val chapter = ReaderChapter(ChapterImpl())
+        val original = ReaderPage(0).apply { this.chapter = chapter }
+        val split = InsertPage(original)
+        val other = ReaderPage(1).apply { this.chapter = chapter }
+        for (page in listOf(original, split)) {
+            original.applyChapterVisibility(null, null)
+            val initial = page.chapterVisibilityRevision
+            val values = flow {
+                emit(0L)
+                other.applyChapterVisibility(ReaderChapterReviewStore.Choice.HIDE, null)
+                emit(1L)
+                original.applyChapterVisibility(ReaderChapterReviewStore.Choice.HIDE, null)
+                emit(2L)
+                emit(3L)
+                original.applyChapterVisibility(ReaderChapterReviewStore.Choice.KEEP, null)
+                emit(4L)
+            }.forPageVisibility { page.chapterVisibilityRevision }.toList()
+            assertEquals(listOf(initial, initial + 1, initial + 2), values)
+        }
+    }
+
+    @Test fun reevaluationClearsObsoleteDimensionFlagsWithoutLosingManualChoicesOrIndependentRules() {
+        val fixture = Fixture(unusualWidth = 720, unusualHeight = 700)
+        try {
+            fixture.ready()
+            val page = fixture.pages[3]
+            // The old heuristic's derived state was memory-only, never a persisted image rule.
+            page.applyChapterVisibility(null, ReaderChapterSizePolicy.Reason.WIDER_AND_SHORTER)
+            assertTrue(page.isHidden)
+            page.applyRuleVisibility(true)
+            fixture.review.original(page, fixture.bytes[3], ReaderImageRules.hash(fixture.bytes[3]))
+            assertNull(page.chapterSizeReason)
+            assertTrue(page.isHidden) // Independent image-rule state remains authoritative.
+            page.applyRuleVisibility(false)
+            assertFalse(page.isHidden)
+            fixture.review.choose(page, ReaderChapterReviewStore.Choice.HIDE)
+            assertTrue(page.isHidden)
+            fixture.review.choose(page, ReaderChapterReviewStore.Choice.KEEP)
+            assertFalse(page.isHidden)
+            fixture.review.close()
+            val reopened = fixture.newReview(ReaderChapterReviewStore(fixture.file), "chapter1")
+            fixture.chapter.review = reopened
+            reopened.start()
+            runBlocking { withTimeout(2_000) { reopened.revision.first { reopened.assessment.reference != null } } }
+            reopened.original(page, fixture.bytes[3], ReaderImageRules.hash(fixture.bytes[3]))
+            assertEquals(ReaderChapterReviewStore.Choice.KEEP, reopened.choice(page))
+            assertFalse(page.isHidden)
+        } finally { fixture.close() }
+    }
+
     @Test fun downloadedHeaderEvidenceExcludesWithoutChangingOriginalPagesOrIndices() {
         val fixture = Fixture()
         try {
@@ -35,7 +89,7 @@ class ReaderChapterSizeIntegrationTest {
             assertArrayEquals(fixture.bytes[3], page.stream!!.invoke().use { it.readBytes() })
             assertTrue(page.isHidden)
             assertEquals((0..9).toList(), fixture.pages.map { it.index })
-            assertEquals(ReaderChapterSizePolicy.Reason.DIFFERENT_WIDTH, page.chapterSizeReason)
+            assertEquals(ReaderChapterSizePolicy.Reason.WIDER_AND_SHORTER, page.chapterSizeReason)
         } finally { fixture.close() }
     }
 
@@ -186,13 +240,13 @@ class ReaderChapterSizeIntegrationTest {
         }
     }
 
-    internal class Fixture(start: Boolean = true) {
+    internal class Fixture(start: Boolean = true, unusualWidth: Int = 1532, unusualHeight: Int = 1024) {
         private val context = InstrumentationRegistry.getInstrumentation().targetContext
         val root = File(context.cacheDir, "reader-chapter-size-" + UUID.randomUUID()).apply { check(mkdirs()) }
         val file = File(root, "overrides")
         val bytes = (0..9).map { index ->
-            val width = if (index == 3) 1532 else 720
-            val height = if (index == 3) 1024 else 1500
+            val width = if (index == 3) unusualWidth else 720
+            val height = if (index == 3) unusualHeight else 1500
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(Color.rgb(31 + index, 77 + index, 103 + index))
             ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }

@@ -11,16 +11,33 @@ class ReaderChapterSizePolicyTest {
     }
     private fun size(width: Int, height: Int) = ReaderChapterSizePolicy.Size(width, height)
 
-    @Test fun recordedWideCardAndThinBannerAreExcludedByDefault() {
+    @Test fun onlyPagesBothWiderAndShorterAreExcludedByDefault() {
         val result = ReaderChapterSizePolicy.evaluate(chapter(3 to size(1532, 1024), 5 to size(720, 192)))
         assertEquals(
             mapOf(
-                3 to ReaderChapterSizePolicy.Reason.DIFFERENT_WIDTH,
-                5 to ReaderChapterSizePolicy.Reason.SHORTER_HEIGHT,
+                3 to ReaderChapterSizePolicy.Reason.WIDER_AND_SHORTER,
             ),
             result.exclusions,
         )
         assertEquals(size(720, 1500), result.reference)
+    }
+
+    @Test fun widthAndHeightConditionsAreConjunctive() {
+        // Independent chapters retain enough normal peers for a reliable reference in every case.
+        for ((width, height) in listOf(720 to 1500, 720 to 700, 1000 to 1500, 1000 to 1800, 640 to 700, 640 to 1500)) {
+            assertTrue(
+                ReaderChapterSizePolicy.evaluate(chapter(4 to size(width, height))).exclusions.isEmpty(),
+                "$width x $height must remain visible",
+            )
+        }
+        assertEquals(setOf(4), ReaderChapterSizePolicy.evaluate(chapter(4 to size(1000, 700))).exclusions.keys)
+    }
+
+    @Test fun shortExpectedWidthPagesAndWiderShortChapterTailsStayVisible() {
+        assertTrue(ReaderChapterSizePolicy.evaluate(chapter(4 to size(720, 200))).exclusions.isEmpty())
+        for (index in 7..9) {
+            assertTrue(ReaderChapterSizePolicy.evaluate(chapter(index to size(1000, 700))).exclusions.isEmpty())
+        }
     }
 
     @Test fun coversSpreadsAndShortFinalPagesRemainVisible() {
@@ -61,7 +78,7 @@ class ReaderChapterSizePolicyTest {
     }
 
     @Test fun userMarkedStoryIsNeverReclassifiedByGeometry() {
-        val pages = chapter(4 to size(640, 900)).map {
+        val pages = chapter(4 to size(1000, 700)).map {
             if (it.index == 4) it.copy(label = ReaderChapterSizePolicy.Label.STORY) else it
         }
         assertTrue(ReaderChapterSizePolicy.evaluate(pages).exclusions.isEmpty())

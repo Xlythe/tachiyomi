@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
+import eu.kanade.tachiyomi.ui.reader.viewer.forPageVisibility
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.widget.ViewPagerAdapter
 import kotlinx.coroutines.CancellationException
@@ -113,7 +114,7 @@ class PagerPageHolder(
                 page.statusFlow,
                 ReaderImageRules.revision,
                 ReaderImageRules.automaticRevision,
-                ReaderChapterReviews.revision,
+                ReaderChapterReviews.revision.forPageVisibility { page.chapterVisibilityRevision },
             ) { state, _, _, _ -> state }.collectLatest { state ->
                 when (state) {
                     Page.State.QUEUE -> setQueued()

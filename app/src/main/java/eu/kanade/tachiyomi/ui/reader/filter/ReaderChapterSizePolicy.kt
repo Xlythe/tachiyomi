@@ -7,7 +7,7 @@ internal object ReaderChapterSizePolicy {
     data class Size(val width: Int, val height: Int)
     enum class Label { UNKNOWN, STORY, SPAM }
     data class Page(val index: Int, val size: Size?, val label: Label = Label.UNKNOWN)
-    enum class Reason { DIFFERENT_WIDTH, SHORTER_HEIGHT }
+    enum class Reason { WIDER_AND_SHORTER }
     data class Assessment(val reference: Size?, val exclusions: Map<Int, Reason>, val inspected: Int, val total: Int)
 
     fun evaluate(pages: List<Page>): Assessment {
@@ -32,7 +32,7 @@ internal object ReaderChapterSizePolicy {
         for (page in valid) {
             if (page.label != Label.UNKNOWN) continue
             val size = requireNotNull(page.size)
-            val differentWidth = abs(size.width - width) > maxOf(2, width / 100)
+            val wider = size.width - width > maxOf(2, width / 100)
             val ratio = size.width.toDouble() / size.height
             // Recorded story pages include a shorter cover and three-page tail fragments.
             if (page.index == first && ratio in 0.55..0.85 && (height == 0 || size.height >= height * 0.5)) continue
@@ -41,13 +41,12 @@ internal object ReaderChapterSizePolicy {
                 // Geometry alone cannot distinguish a cover or a double spread from an advert.
                 if (size.width.toDouble() / width in 1.7..2.3 && size.height.toDouble() / height in 0.85..1.15) continue
                 val normalRatio = width.toDouble() / height
-                if (differentWidth && abs(ratio / normalRatio - 1.0) <= 0.025) continue
+                if (wider && abs(ratio / normalRatio - 1.0) <= 0.025) continue
             }
-            if (differentWidth) {
-                excluded[page.index] = Reason.DIFFERENT_WIDTH
-            } else if (height > 0 && last != null && page.index < last - 2 && size.height < height * 0.85 - 4) {
+            if (wider && height > 0 && last != null && page.index < last - 2 && size.height < height * 0.85 - 4) {
+                // Both differences are required. Expected-width short pages and narrower pages stay visible.
                 // Truncated final strips are normal in both print chapters and sliced webtoons.
-                excluded[page.index] = Reason.SHORTER_HEIGHT
+                excluded[page.index] = Reason.WIDER_AND_SHORTER
             }
         }
         return Assessment(reference, excluded, valid.size, pages.size)
